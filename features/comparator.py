@@ -4,25 +4,21 @@ import numpy as np
 def find_similar_swimmers(target_stats, features_df, event_df, max_n=10):
     target_id = target_stats['FINA ID']
     
-    # 1. EVENT FILTERING: Ensure we only compare the exact same event
-    target_raw_events = event_df[event_df['FINA ID'] == target_id]
-    if not target_raw_events.empty and 'Event' in target_raw_events.columns:
-        target_event = target_raw_events['Event'].mode()[0] # Get their most frequent event
-        # Filter raw data to only this event
-        event_df = event_df[event_df['Event'] == target_event].copy()
-    else:
-        target_event = "Unknown"
+    # Because app.py already perfectly filtered the data by Stroke and Distance,
+    # we don't need to filter by event again here. 
+    target_event = "Selected Event"
 
     # Start with everyone except the target
     pool = features_df[features_df['FINA ID'] != target_id].copy()
     
-    # 2. Extract EXACT columns from the filtered raw data
+    # Extract EXACT columns from the filtered raw data
+    # FIX: Using 'Time_Sec' instead of 'Time' to match data_processor
     raw_stats = event_df.groupby('FINA ID').agg(
         Country=('Country', 'first'),
-        best_time=('Time', 'min') 
+        best_time=('Time_Sec', 'min') 
     ).reset_index()
     
-    # Merge and drop anyone who doesn't have a time for this specific event
+    # Merge and drop anyone who doesn't have a time
     pool = pd.merge(pool, raw_stats, on='FINA ID', how='inner')
     
     target_raw = raw_stats[raw_stats['FINA ID'] == target_id]
@@ -32,7 +28,7 @@ def find_similar_swimmers(target_stats, features_df, event_df, max_n=10):
     target_country = target_raw.iloc[0]['Country']
     target_best_time = target_raw.iloc[0]['best_time']
 
-    # 3. Features for KNN
+    # Features for KNN
     features_to_calc = ['best_time', 'consistency_score']
     if 'slope' in pool.columns:
         features_to_calc.append('slope')
@@ -48,7 +44,7 @@ def find_similar_swimmers(target_stats, features_df, event_df, max_n=10):
             pool[col] = 0.0
         pool[col] = pool[col].fillna(pool[col].median())
 
-    # 4. KNN Distance Logic
+    # KNN Distance Logic
     pool['similarity_distance'] = 0.0
     for col in features_to_calc:
         min_val, max_val = pool[col].min(), pool[col].max()
@@ -66,14 +62,11 @@ def find_similar_swimmers(target_stats, features_df, event_df, max_n=10):
     pool = pool.drop_duplicates(subset=['Swimmer'])
     pool = pool.sort_values('similarity_distance')
 
-    # 5. SMART THRESHOLD CUTOFF
-    # We take the best match. Anyone whose distance is more than 3x worse than the best match is dropped.
+    # SMART THRESHOLD CUTOFF
     if not pool.empty:
         best_distance = pool.iloc[0]['similarity_distance']
         cutoff_threshold = best_distance * 3.0 
-        # But allow a minimum threshold so we don't accidentally cut everyone if the best match is a literal clone
         cutoff_threshold = max(cutoff_threshold, 0.15) 
         pool = pool[pool['similarity_distance'] <= cutoff_threshold]
 
-    # Return matches (up to max_n), the target's best time, AND the event name for the UI
     return pool.head(max_n), target_best_time, target_event

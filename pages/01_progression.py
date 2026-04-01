@@ -92,19 +92,51 @@ else:
     # --- 4. VISUALISATION: Career Timeline ---
     st.write("#### Career Timeline (Best Time per Year)")
     
-    # Get best time per year for the chart
-    yearly_best = history.groupby('Year')['Time_Sec'].min().reset_index()
-    
-    if len(yearly_best) > 1:
-        fig = px.line(yearly_best, x='Year', y='Time_Sec', markers=True, 
-                      title=f"{name} - Time Progression (Lower is faster)")
-        # Invert Y-axis so "Faster" (lower times) visually moves upward
-        fig.update_yaxes(autorange="reversed") 
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Not enough historical data to plot a trendline (Only 1 year recorded for this event).")
+    # 1. Ensure Date is formatted properly
+    plot_df = history.copy()
+    plot_df['Date'] = pd.to_datetime(plot_df['Date'], errors='coerce')
 
-# --- 4.5 NEW: SHORT-TERM FORM Forecast (TIME SERIES) ---
+    # 2. Extract the EXACT ROW of their best time each year to preserve Date, Age, and Event
+    valid_plot_df = plot_df.dropna(subset=['Date', 'Time_Sec'])
+    if not valid_plot_df.empty:
+        idx_best = valid_plot_df.groupby('Year')['Time_Sec'].idxmin()
+        yearly_best = valid_plot_df.loc[idx_best].sort_values('Date')
+
+        # Clean up the Age column so it doesn't display decimals in the tooltip
+        yearly_best['Age'] = yearly_best['Age'].apply(lambda x: f"{int(x)}" if pd.notna(x) else "N/A")
+
+        if len(yearly_best) > 1:
+            fig = px.line(
+                yearly_best,
+                x='Date',       # Plot exactly on the chronological date
+                y='Time_Sec',
+                markers=True,
+                title=f"{name} - Time Progression (Lower is faster)",
+                hover_data={
+                    'Date': '|%b %d, %Y', # Formats as Jan 15, 2024
+                    'Time': True,         # Shows the raw string time (e.g., "52.53")
+                    'Age': True,
+                    'Event': True,
+                    'Time_Sec': False     # Hide the ugly decimal seconds since we have 'Time'
+                }
+            )
+
+            # Force X-axis to display only the Years, even though it's plotted by Date
+            fig.update_xaxes(
+                tickformat="%Y",
+                dtick="M12", 
+                title_text="Year"
+            )
+
+            # Invert Y-axis so "Faster" (lower times) visually moves upward
+            fig.update_yaxes(autorange="reversed")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Not enough historical data to plot a trendline (Only 1 year recorded for this event).")
+    else:
+        st.info("No valid date records found for this swimmer to plot.")
+
+# --- 4.5 SHORT-TERM FORM Forecast (TIME SERIES) ---
     st.write("---")
     st.write(f"### 🔮 Short-Term Form Forecast (Time Series)")
     st.write("Using Holt's Exponential Smoothing to predict their next upcoming race times based on recent form.")
