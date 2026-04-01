@@ -134,4 +134,6 @@ if st.button("🚀 Process Analytics & Load Pages"):
             st.session_state['swimmer_history'] = event_df[event_df['Swimmer'] == swimmer_name]
             st.session_state['event_df'] = event_df
             
+            st.session_state['features_df'] = features_df
+            
             st.success("✅ Analytics loaded! Click the pages in the sidebar to view the dashboards.")

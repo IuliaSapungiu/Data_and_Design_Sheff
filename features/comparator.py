@@ -1,143 +1,79 @@
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.preprocessing import StandardScaler
-from features.progression import compute_progression_features
-from features.performance import compute_performance_features
 
-
-FEATURE_COLS = ["Age", "percentile", "progression_slope", "rate_of_improvement", "years_competing"]
-
-
-def build_feature_table(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Combines progression + performance features into one table.
-    Also pulls latest Age from raw df.
-    """
-    prog = compute_progression_features(df)
-    perf = compute_performance_features(df)
-
-    # Latest age per swimmer
-    latest_age = (
-        df.sort_values("Year")
-        .groupby("Swimmer")["Age"]
-        .last()
-        .reset_index()
-        .rename(columns={"Age": "Age"})
-    )
-
-    merged = prog.merge(perf, on=["Swimmer", "FullEvent"], how="inner")
-    merged = merged.merge(latest_age, on="Swimmer", how="left")
-
-    return merged.dropna(subset=FEATURE_COLS)
-
-
-def find_similar_swimmers(
-    feature_table: pd.DataFrame,
-    swimmer: str,
-    event: str,
-    top_n: int = 20
-) -> pd.DataFrame:
-    """
-    Given a feature table, finds the top_n most similar swimmers
-    to the target swimmer in the same event using Euclidean distance.
-    """
-    event_df = feature_table[feature_table["FullEvent"] == event].copy()
-
-    if swimmer not in event_df["Swimmer"].values:
-        return pd.DataFrame()
-
-    target_row = event_df[event_df["Swimmer"] == swimmer][FEATURE_COLS].values
-    others = event_df[FEATURE_COLS].values
-
-    scaler = StandardScaler()
-    scaled_all = scaler.fit_transform(others)
-    scaled_target = scaler.transform(target_row)
-
-    distances = np.linalg.norm(scaled_all - scaled_target, axis=1)
-    event_df = event_df.copy()
-    event_df["similarity_distance"] = distances
-
-    # Exclude the swimmer themselves, sort by distance
-    similar = (
-        event_df[event_df["Swimmer"] != swimmer]
-        .sort_values("similarity_distance")
-        .head(top_n)
-    )
-    return similar
-
-
-def predict_performance(
-    df: pd.DataFrame,
-    feature_table: pd.DataFrame,
-    swimmer: str,
-    event: str
-):
-    """
-    Trains a GradientBoosting model on similar swimmers and predicts:
-      - predicted_time_2yr      : expected time in 2 years
-      - expected_improvement_pct: % improvement expected
-      - prob_final               : probability of reaching final level (top 10%)
-
-    Returns a dict of predictions or None if not enough data.
-    """
-    similar = find_similar_swimmers(feature_table, swimmer, event, top_n=20)
-
-    if len(similar) < 5:
-        return None
-
-    # Target: average improvement per year (from progression)
-    if "rate_of_improvement" not in similar.columns:
-        return None
-
-    X = similar[FEATURE_COLS]
-    y = similar["rate_of_improvement"]
-
-    if y.nunique() < 2:
-        return None
-
-    model = GradientBoostingRegressor(n_estimators=100, random_state=42)
-    model.fit(X, y)
-
-    target_features = feature_table[
-        (feature_table["Swimmer"] == swimmer) &
-        (feature_table["FullEvent"] == event)
-    ][FEATURE_COLS]
-
-    if target_features.empty:
-        return None
-
-    pred_improvement_per_year = model.predict(target_features)[0]
-    pred_improvement_2yr = pred_improvement_per_year * 2
-
-    # Latest time
-    swimmer_event_df = df[
-        (df["Swimmer"] == swimmer) & (df["FullEvent"] == event)
-    ].sort_values("Year")
-    latest_time = float(swimmer_event_df["Time"].iloc[-1])
-
-    pred_time_2yr = latest_time - pred_improvement_2yr  # subtract because lower = faster
-
-    # Expected improvement %
-    expected_improvement_pct = (pred_improvement_2yr / latest_time) * 100
-
-    # Probability of reaching final level (top 10% of event times)
-    all_event_times = df[df["FullEvent"] == event]["Time"].dropna().values
-    top10_threshold = np.percentile(all_event_times, 10)  # lower = faster
-
-    current_gap   = latest_time - top10_threshold
-    predicted_gap = pred_time_2yr - top10_threshold
-
-    if current_gap <= 0:
-        prob_final = 1.0
+def find_similar_swimmers(target_stats, features_df, event_df, max_n=10):
+    target_id = target_stats['FINA ID']
+    
+    # 1. EVENT FILTERING: Ensure we only compare the exact same event
+    target_raw_events = event_df[event_df['FINA ID'] == target_id]
+    if not target_raw_events.empty and 'Event' in target_raw_events.columns:
+        target_event = target_raw_events['Event'].mode()[0] # Get their most frequent event
+        # Filter raw data to only this event
+        event_df = event_df[event_df['Event'] == target_event].copy()
     else:
-        prob_final = max(0.0, min(1.0, 1 - (predicted_gap / current_gap)))
+        target_event = "Unknown"
 
-    return {
-        "latest_time":             latest_time,
-        "predicted_time_2yr":      pred_time_2yr,
-        "expected_improvement_2yr": pred_improvement_2yr,
-        "expected_improvement_pct": expected_improvement_pct,
-        "prob_final":              prob_final,
-        "similar_swimmers":        similar,
+    # Start with everyone except the target
+    pool = features_df[features_df['FINA ID'] != target_id].copy()
+    
+    # 2. Extract EXACT columns from the filtered raw data
+    raw_stats = event_df.groupby('FINA ID').agg(
+        Country=('Country', 'first'),
+        best_time=('Time', 'min') 
+    ).reset_index()
+    
+    # Merge and drop anyone who doesn't have a time for this specific event
+    pool = pd.merge(pool, raw_stats, on='FINA ID', how='inner')
+    
+    target_raw = raw_stats[raw_stats['FINA ID'] == target_id]
+    if target_raw.empty:
+        return pd.DataFrame(), 0.0, target_event # Failsafe
+        
+    target_country = target_raw.iloc[0]['Country']
+    target_best_time = target_raw.iloc[0]['best_time']
+
+    # 3. Features for KNN
+    features_to_calc = ['best_time', 'consistency_score']
+    if 'slope' in pool.columns:
+        features_to_calc.append('slope')
+        
+    target_stats_filled = {
+        'best_time': target_best_time,
+        'consistency_score': target_stats.get('consistency_score', pool.get('consistency_score', pd.Series([80])).median()),
+        'slope': target_stats.get('slope', pool.get('slope', pd.Series([0])).median())
     }
+
+    for col in features_to_calc:
+        if col not in pool.columns:
+            pool[col] = 0.0
+        pool[col] = pool[col].fillna(pool[col].median())
+
+    # 4. KNN Distance Logic
+    pool['similarity_distance'] = 0.0
+    for col in features_to_calc:
+        min_val, max_val = pool[col].min(), pool[col].max()
+        val_range = max_val - min_val if max_val - min_val != 0 else 1
+        
+        pool_norm = (pool[col] - min_val) / val_range
+        target_norm = (target_stats_filled[col] - min_val) / val_range
+        
+        weight = 0.60 if col == 'best_time' else (0.40 / max(1, len(features_to_calc) - 1))
+        pool['similarity_distance'] += weight * ((pool_norm - target_norm) ** 2)
+        
+    pool['similarity_distance'] = np.sqrt(pool['similarity_distance'])
+    pool.loc[pool['Country'] == target_country, 'similarity_distance'] *= 0.85 
+
+    pool = pool.drop_duplicates(subset=['Swimmer'])
+    pool = pool.sort_values('similarity_distance')
+
+    # 5. SMART THRESHOLD CUTOFF
+    # We take the best match. Anyone whose distance is more than 3x worse than the best match is dropped.
+    if not pool.empty:
+        best_distance = pool.iloc[0]['similarity_distance']
+        cutoff_threshold = best_distance * 3.0 
+        # But allow a minimum threshold so we don't accidentally cut everyone if the best match is a literal clone
+        cutoff_threshold = max(cutoff_threshold, 0.15) 
+        pool = pool[pool['similarity_distance'] <= cutoff_threshold]
+
+    # Return matches (up to max_n), the target's best time, AND the event name for the UI
+    return pool.head(max_n), target_best_time, target_event
