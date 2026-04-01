@@ -17,10 +17,10 @@ else:
     st.write(f"### Current Standing: {name}")
     
     # --- 1. BENCHMARK EVALUATION LOGIC ---
-    gap = stats['latest_gap_to_top10']
+    gap = stats['latest_gap_to_top10'] # Keeping the variable name same for compatibility, but it represents Top 8
     if gap <= 0:
         gap_eval = "👑 Elite / Podium Pace"
-        gap_text = f"{abs(gap):.2f}s (Top 10)"
+        gap_text = f"{abs(gap):.2f}s (Top 8)"
     elif gap <= 0.5:
         gap_eval = "🚀 Finalist Pace"
         gap_text = f"+{gap:.2f}s (Slower)"
@@ -45,12 +45,13 @@ else:
     col1.metric("Career Stage", stats['career_stage'], help="Based on their age in their most recent active year: Early (<20), Peak (20-26), Decline (>26).")
     col2.metric("Years Competing", int(stats['years_competing']), help="Total distinct years this athlete recorded a time.")
     
+    # FIX: Updated text to accurately reflect the Championship Pace backend logic
     col3.metric(
-        label="Gap to Top 10", 
+        label="Gap to Champ Pace", 
         value=gap_text,
         delta=gap_eval,
         delta_color="off",
-        help="Difference between their latest best time and the 10th fastest global time that year."
+        help="Difference between their latest best time and the Top 8 Average (Championship Pace) for that year."
     )
     
     col4.metric(
@@ -63,17 +64,18 @@ else:
 
     with st.expander("📚 How to read these benchmarks (Coach's Guide)"):
         st.markdown("""
-        * **Gap to Top 10:** If they are inside the Top 10 (`<= 0s`), they are on **Elite / Podium Pace**. Being within 0.5s is considered **Finalist Pace**.
+        * **Gap to Champ Pace:** We take the average time of the Top 8 globally to find the 'Championship Pace'. If the athlete is beating this time (`<= 0s`), they are on **Elite / Podium Pace**. Being within 0.5s is considered **Finalist Pace**.
         * **Distance from PB:** If the distance is `0.00s`, it means their most recent season was their absolute fastest ever (**Absolute Peak**).
         """)
 
     st.write("---")
     
-# --- 3. THE VISUALISATION: Swimmer vs. The World ---
+    # --- 3. THE VISUALISATION: Swimmer vs. The World ---
     st.write("### Contextual Breakdown: Swimmer vs. The World")
     
+    # FIX: Re-aligned the graph to calculate the Top 8 Average instead of 10th place max!
     global_yearly = event_df.groupby('Year')['Time_Sec'].agg(
-        top_10_time=lambda x: x.nsmallest(10).max() if len(x) >= 10 else x.max()
+        championship_pace=lambda x: x.nsmallest(8).mean() if len(x) >= 8 else x.mean()
     ).reset_index()
     
     swimmer_yearly = history.groupby('Year')['Time_Sec'].min().reset_index()
@@ -84,8 +86,8 @@ else:
     if len(compare_df) > 0:
         fig = go.Figure()
         
-        # FIX: Dynamically calculate the ceiling so we don't ruin the scale!
-        fastest_time = min(compare_df['top_10_time'].min(), compare_df['Swimmer_Time'].min())
+        # Dynamically calculate the ceiling so we don't ruin the scale
+        fastest_time = min(compare_df['championship_pace'].min(), compare_df['Swimmer_Time'].min())
         ceiling_time = fastest_time - 1.0 # Just 1 second faster than the best time on the chart
         
         # Add the invisible ceiling
@@ -94,10 +96,10 @@ else:
             mode='none', showlegend=False, hoverinfo='skip'
         ))
         
-        # Then we draw the Top 10 line and fill the space between it and the invisible ceiling
+        # Draw the Championship Pace line and fill the space between it and the invisible ceiling
         fig.add_trace(go.Scatter(
-            x=compare_df['Year'], y=compare_df['top_10_time'], 
-            mode='lines+markers', name='Global Top 10 Cutoff',
+            x=compare_df['Year'], y=compare_df['championship_pace'], 
+            mode='lines+markers', name='Top 8 Champ Pace',
             line=dict(color='red', dash='dash'),
             fill='tonexty', fillcolor='rgba(255, 215, 0, 0.15)' # Faint Gold Shading
         ))
@@ -110,18 +112,18 @@ else:
         ))
         
         fig.update_layout(
-            title=f"Yearly Comparison: {name} vs. Global Top 10 Cutoff",
+            title=f"Yearly Comparison: {name} vs. Global Top 8 Average (Champ Pace)",
             xaxis_title="Year",
-            yaxis_title="Time (Seconds) - Lower is Faster",
+            yaxis_title="Time (Seconds) - Higher is Faster",
             hovermode="x unified"
         )
                           
         # Invert the Y-axis so "Faster" is visually UP
         fig.update_yaxes(autorange="reversed")
         
-        # Add an annotation to explain the gold zone (dynamically placed now)
+        # Add an annotation to explain the gold zone
         fig.add_annotation(
-            x=compare_df['Year'].iloc[0], y=compare_df['top_10_time'].iloc[0] - 0.2,
+            x=compare_df['Year'].iloc[0], y=compare_df['championship_pace'].iloc[0] - 0.2,
             text="🏆 Elite Zone", showarrow=False, font=dict(color="goldenrod")
         )
         
