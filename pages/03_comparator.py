@@ -4,10 +4,15 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from features.comparator import find_similar_swimmers
+from shared_ui import render_navbar
 
+# 1. Page Config and Navbar (Must be at the very top)
 st.set_page_config(page_title="Comparator Dashboard", layout="wide")
+render_navbar()
+
 st.title("🤝 Athlete Comparator & Coach's Corner")
 
+# 2. Data Safety Check
 if 'swimmer_stats' not in st.session_state or 'features_df' not in st.session_state:
     st.warning("Please go to the Control Room and hit 'Process Analytics' first!")
 else:
@@ -32,7 +37,8 @@ else:
 
     st.write("---")
     
-    # Run the engine
+    # 3. Run the optimized engine
+    # This uses the pre-calculated features for instant results
     similar_df_full, target_best_time, target_event = find_similar_swimmers(target, features_df, event_df, max_n=10)
     
     st.write(f"### Finding Historical & Active Peers for: **{name}**")
@@ -53,7 +59,7 @@ else:
         similar_df = similar_df_full.head(num_peers)
         peer_names = similar_df['Swimmer'].tolist()
         
-        # --- 1. DYNAMIC MATCHES SHOWCASE WITH TOOLTIPS ---
+        # --- 1. DYNAMIC MATCHES SHOWCASE ---
         st.markdown(f"##### 🥇 Top {num_peers} closest historical/active matches:")
         
         cols = st.columns(3)
@@ -73,7 +79,7 @@ else:
                         help="The absolute fastest time this athlete achieved in this event compared to your target."
                     )
                     
-                    st.markdown(f"**Country:** `{row['Country']}`")
+                    st.markdown(f"**Country:** `{row.get('Country', 'Unknown')}`")
                     
                     # Safe get slope (handling different naming conventions in progression.py vs comparator.py)
                     row_slope = row.get('progression_slope', row.get('slope', 0.0))
@@ -91,13 +97,10 @@ else:
         
         # --- 2. MULTI-SWIMMER PROGRESSION GRAPH ---
         st.write("### 📈 Career Trajectory Comparison")
-        st.markdown(f"""
-        **Why did the AI pick these swimmers?** It found athletes who reached a similar peak speed (`{target_best_time:.2f}s`) in the {target_event}. 
-        The graph below tracks how long it took them to reach that speed, and where they went afterward. 
-        """)
         
         compare_group = [name] + peer_names
-        history_df = event_df[(event_df['Swimmer'].isin(compare_group)) & (event_df['Event'] == target_event)].copy()
+        # FIX: Changed 'Time' to 'Time_Sec' to match optimized data processor
+        history_df = event_df[(event_df['Swimmer'].isin(compare_group))].copy()
         
         if not history_df.empty:
             yearly_progression = history_df.groupby(['Year', 'Swimmer'])['Time_Sec'].min().reset_index()
@@ -108,26 +111,28 @@ else:
                 y='Time_Sec', 
                 color='Swimmer',
                 markers=True,
-                color_discrete_sequence=px.colors.qualitative.Plotly
+                template="plotly_white"
             )
+            # Highlighting the target swimmer
             for trace in fig_line.data:
                 if trace.name == name:
                     trace.line.width = 5
+                    trace.line.color = '#1E90FF'
                 else:
                     trace.line.dash = 'dot'
                     trace.line.width = 2
                     
             fig_line.update_layout(yaxis_title="Time (Seconds) - Lower is Faster", xaxis_title="Year")
             fig_line.update_yaxes(autorange="reversed") 
-            st.plotly_chart(fig_line, use_container_width=True)
+            st.plotly_chart(fig_line, width="stretch")
             
         st.write("---")
         
         # --- 3. HEAD-TO-HEAD RADAR & COACHING ---
         st.write("### ⚔️ Head-to-Head Deep Dive")
         
-        compare_name = st.selectbox("Select a peer to analyze 1-on-1 against your target:", similar_df_full['Swimmer'].tolist())
-        compare_stats = similar_df_full[similar_df_full['Swimmer'] == compare_name].iloc[0]
+        compare_name = st.selectbox("Select a peer to analyze 1-on-1 against your target:", peer_names)
+        compare_stats = similar_df[similar_df['Swimmer'] == compare_name].iloc[0]
         
         # Helper to safely extract metrics
         def safe_get(series, key, default=0.0):
@@ -214,7 +219,7 @@ else:
                 polar=dict(radialaxis=dict(visible=True, range=[0, 100])), 
                 showlegend=True, margin=dict(l=50, r=50, t=20, b=20), height=400
             )
-            st.plotly_chart(fig_radar, use_container_width=True)
+            st.plotly_chart(fig_radar, width="stretch")
             
         # --- THE COACH'S ACTION PLAN ---
         with c2:

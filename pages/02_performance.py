@@ -1,7 +1,10 @@
 import streamlit as st
 import plotly.graph_objects as go
+from shared_ui import render_navbar
 
-st.title("🏆 Performance & Context")
+render_navbar()
+
+st.title("Performance & Context")
 
 if 'swimmer_stats' not in st.session_state:
     st.warning("Please go back to the Control Room (App) and click 'Process Analytics' first.")

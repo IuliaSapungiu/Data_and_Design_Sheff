@@ -2,6 +2,10 @@ import pandas as pd
 import numpy as np
 
 def find_similar_swimmers(target_stats, features_df, event_df, max_n=10):
+    """
+    High-speed KNN Comparator.
+    Uses pre-calculated 'best_time' from the Control Room.
+    """
     target_id = target_stats['FINA ID']
     
     # Because app.py already perfectly filtered the data by Stroke and Distance,
@@ -12,7 +16,6 @@ def find_similar_swimmers(target_stats, features_df, event_df, max_n=10):
     pool = features_df[features_df['FINA ID'] != target_id].copy()
     
     # Extract EXACT columns from the filtered raw data
-    # FIX: Using 'Time_Sec' instead of 'Time' to match data_processor
     raw_stats = event_df.groupby('FINA ID').agg(
         Country=('Country', 'first'),
         best_time=('Time_Sec', 'min') 
