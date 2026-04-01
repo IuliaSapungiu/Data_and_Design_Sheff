@@ -1,4 +1,6 @@
-myenv/
-data/WA_Rankings_2000_2025_Master_v1.csv
-D:\UoS\Hackaton\swimming-analytics\data\swimmer_height_cache.json
-data/swimmer_height_cache.json
+swimming-app/
+venv/
+.conda/
+*.csv
+*.xlsx
+.DS_Store
