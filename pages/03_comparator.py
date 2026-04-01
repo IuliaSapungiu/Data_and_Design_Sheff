@@ -3,10 +3,15 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from features.comparator import find_similar_swimmers
+from shared_ui import render_navbar
 
+# 1. Page Config and Navbar (Must be at the very top)
 st.set_page_config(page_title="Comparator Dashboard", layout="wide")
+render_navbar()
+
 st.title("🤝 Athlete Comparator & Coach's Corner")
 
+# 2. Data Safety Check
 if 'swimmer_stats' not in st.session_state or 'features_df' not in st.session_state:
     st.warning("Please go to the Control Room and hit 'Process Analytics' first!")
 else:
@@ -19,17 +24,18 @@ else:
     with st.expander("📚 How to read these benchmarks (Coach's Guide)", expanded=False):
         st.markdown("""
         ### Understanding the AI Benchmarks
-        This engine uses a **K-Nearest Neighbors (KNN)** algorithm with a **Smart Quality Threshold**. It doesn't just return a random top 10; it only returns athletes who are *statistically close* to your target in their specific primary event. If only 4 athletes match the criteria, it only shows 4.
+        This engine uses a **K-Nearest Neighbors (KNN)** algorithm with a **Smart Quality Threshold**. It doesn't just return a random top 10; it only returns athletes who are *statistically close* to your target in their specific primary event.
 
         #### The Metrics Explained:
         * **Best Time vs Target:** The raw speed difference. A negative delta means this peer was *faster*.
-        * **Trajectory:** Measures year-over-year improvement. A negative number means they are dropping time. `0.000` means they only have one year of data on record.
+        * **Trajectory:** Measures year-over-year improvement (slope). A negative number means they are dropping time.
         * **Consistency:** How tightly clustered their race times are. Higher is better.
         """)
 
     st.write("---")
     
-    # Run the engine
+    # 3. Run the optimized engine
+    # This uses the pre-calculated features for instant results
     similar_df_full, target_best_time, target_event = find_similar_swimmers(target, features_df, event_df, max_n=10)
     
     st.write(f"### Finding Historical & Active Peers for: **{name}**")
@@ -50,7 +56,7 @@ else:
         similar_df = similar_df_full.head(num_peers)
         peer_names = similar_df['Swimmer'].tolist()
         
-        # --- 1. DYNAMIC MATCHES SHOWCASE WITH TOOLTIPS ---
+        # --- 1. DYNAMIC MATCHES SHOWCASE ---
         st.markdown(f"##### 🥇 Top {num_peers} closest historical/active matches:")
         
         cols = st.columns(3)
@@ -62,7 +68,6 @@ else:
                     p_time = row['best_time']
                     time_diff = p_time - target_best_time
                     
-                    # Tooltips added via help parameter
                     st.metric(
                         "Best Time vs Target", 
                         f"{p_time:.2f}s", 
@@ -71,7 +76,7 @@ else:
                         help="The absolute fastest time this athlete achieved in this event compared to your target."
                     )
                     
-                    st.markdown(f"**Country:** `{row['Country']}`")
+                    st.markdown(f"**Country:** `{row.get('Country', 'Unknown')}`")
                     st.markdown(
                         f"**Trajectory:** `{row.get('slope', 0.0):.3f}`", 
                         help="Negative is good (dropping time). 0.000 means only 1 year of data exists."
@@ -85,28 +90,27 @@ else:
         
         # --- 2. MULTI-SWIMMER PROGRESSION GRAPH ---
         st.write("### 📈 Career Trajectory Comparison")
-        st.markdown(f"""
-        **Why did the AI pick these swimmers?** It found athletes who reached a similar peak speed (`{target_best_time:.2f}s`) in the {target_event}. 
-        The graph below tracks how long it took them to reach that speed, and where they went afterward. 
-        """)
         
         compare_group = [name] + peer_names
-        history_df = event_df[(event_df['Swimmer'].isin(compare_group)) & (event_df['Event'] == target_event)].copy()
+        # FIX: Changed 'Time' to 'Time_Sec' to match optimized data processor
+        history_df = event_df[(event_df['Swimmer'].isin(compare_group))].copy()
         
         if not history_df.empty:
-            yearly_progression = history_df.groupby(['Year', 'Swimmer'])['Time'].min().reset_index()
+            yearly_progression = history_df.groupby(['Year', 'Swimmer'])['Time_Sec'].min().reset_index()
             
             fig_line = px.line(
                 yearly_progression, 
                 x='Year', 
-                y='Time', 
+                y='Time_Sec', 
                 color='Swimmer',
                 markers=True,
-                color_discrete_sequence=px.colors.qualitative.Plotly
+                template="plotly_white"
             )
+            # Highlighting the target swimmer
             for trace in fig_line.data:
                 if trace.name == name:
                     trace.line.width = 5
+                    trace.line.color = '#1E90FF'
                 else:
                     trace.line.dash = 'dot'
                     trace.line.width = 2
@@ -119,15 +123,9 @@ else:
         
         # --- 3. HEAD-TO-HEAD RADAR & COACHING ---
         st.write("### ⚔️ Head-to-Head Deep Dive")
-        st.markdown("""
-        **How to read this benchmark:** The Radar Chart compares the physical and historical "footprint" of the athletes. 
-        * **Consistency (%):** Are they a reliable performer, or a wild card?
-        * **Age Percentile:** Are they young prodigies or seasoned veterans relative to the dataset?
-        * **Proximity to PB:** How close is their average time to their absolute Personal Best? (Higher means they swim near their peak more often).
-        """)
         
-        compare_name = st.selectbox("Select a peer to analyze 1-on-1 against your target:", similar_df_full['Swimmer'].tolist())
-        compare_stats = similar_df_full[similar_df_full['Swimmer'] == compare_name].iloc[0]
+        compare_name = st.selectbox("Select a peer to analyze 1-on-1 against your target:", peer_names)
+        compare_stats = similar_df[similar_df['Swimmer'] == compare_name].iloc[0]
         
         c1, c2 = st.columns([1.5, 1])
         
@@ -136,6 +134,7 @@ else:
                 val = series.get(key, default)
                 return default if pd.isna(val) else val
 
+            # Normalize scores for radar chart
             dist_score_target = max(0, 100 - (safe_get(target, 'distance_from_peak', 0) * 20))
             dist_score_compare = max(0, 100 - (safe_get(compare_stats, 'distance_from_peak', 0) * 20))
 
@@ -143,11 +142,11 @@ else:
             
             fig_radar = go.Figure()
             fig_radar.add_trace(go.Scatterpolar(
-                r=[safe_get(target, 'consistency_score'), safe_get(target, 'age_percentile'), dist_score_target],
+                r=[safe_get(target, 'consistency_score'), safe_get(target, 'percentile', 0.5)*100, dist_score_target],
                 theta=categories, fill='toself', name=name, line_color='#1E90FF'
             ))
             fig_radar.add_trace(go.Scatterpolar(
-                r=[safe_get(compare_stats, 'consistency_score'), safe_get(compare_stats, 'age_percentile'), dist_score_compare],
+                r=[safe_get(compare_stats, 'consistency_score'), safe_get(compare_stats, 'percentile', 0.5)*100, dist_score_compare],
                 theta=categories, fill='toself', name=compare_name, line_color='#FFD700'
             ))
             
@@ -173,8 +172,8 @@ else:
                 
             if t_slope > c_slope:
                 if c_slope == 0.0:
-                     st.write(f"**💡 Trajectory Note:** Not enough multi-year data for {compare_name} to generate a historical trajectory comparison.")
+                     st.write(f"**💡 Trajectory Note:** Limited data for {compare_name} makes slope comparison difficult.")
                 else:
-                    st.warning(f"**💡 Plateau Warning:** {compare_name} dropped time at a faster historical rate. Review taper strategies.")
+                    st.warning(f"**💡 Plateau Warning:** {compare_name} dropped time at a faster historical rate. Review peak power phase.")
             elif t_slope < 0:
                 st.success(f"**✅ Outpacing Peer:** {name} is on a steeper improvement curve than {compare_name}.")

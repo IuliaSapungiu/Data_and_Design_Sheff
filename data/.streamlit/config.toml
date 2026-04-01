@@ -1,0 +1,11 @@
+[client]
+# This tells Streamlit to natively disable the default sidebar navigation
+showSidebarNavigation = false
+
+[theme]
+# You can also set your Olympic theme colors globally here!
+primaryColor = "#CFB53B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#002366"
+font = "sans serif"

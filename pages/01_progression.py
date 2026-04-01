@@ -4,7 +4,9 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from statsmodels.tsa.holtwinters import Holt
+from shared_ui import render_navbar
 
+render_navbar()
 st.title("📈 Progression Analytics")
 
 # Check if data exists in memory
