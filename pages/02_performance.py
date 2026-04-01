@@ -1,5 +1,6 @@
 import streamlit as st
 import plotly.graph_objects as go
+import pandas as pd
 from shared_ui import render_navbar
 
 render_navbar()
@@ -7,124 +8,120 @@ render_navbar()
 st.title("Performance & Context")
 
 if 'swimmer_stats' not in st.session_state:
-    st.warning("Please go back to the Control Room (App) and click 'Process Analytics' first.")
+    st.warning("Please go back to the Control Room and click 'Process Analytics' first.")
 else:
     stats = st.session_state['swimmer_stats']
     name = st.session_state['swimmer_name']
     history = st.session_state['swimmer_history']
     event_df = st.session_state['event_df'] 
     
-    st.write(f"### Current Standing: {name}")
+    athlete_country = stats.get('country', 'Unknown')
     
-    # --- 1. BENCHMARK EVALUATION LOGIC ---
-    gap = stats['latest_gap_to_top10']
-    if gap <= 0:
-        gap_eval = "👑 Elite / Podium Pace"
-        gap_text = f"{abs(gap):.2f}s (Top 10)"
-    elif gap <= 0.5:
-        gap_eval = "🚀 Finalist Pace"
-        gap_text = f"+{gap:.2f}s (Slower)"
-    elif gap <= 1.5:
-        gap_eval = "🏊 Competitive"
-        gap_text = f"+{gap:.2f}s (Slower)"
-    else:
-        gap_eval = "📈 Developing"
-        gap_text = f"+{gap:.2f}s (Slower)"
-
-    dist_pb = stats['distance_from_peak']
-    if dist_pb == 0.0:
-        pb_eval = "🔥 Absolute Peak"
-    elif dist_pb <= 0.3:
-        pb_eval = "⚡ Near Peak"
-    else:
-        pb_eval = "📉 Off Peak"
-
-    # --- 2. DISPLAY METRICS ---
+    st.write(f"### Current Standing: {name} ({athlete_country})")
+    
+    # --- 1. METRIC CALCULATIONS ---
+    gap = stats.get('latest_gap_to_top10', 0.0)
+    dist_pb = stats.get('distance_from_peak', 0.0)
+    
     col1, col2, col3, col4 = st.columns(4)
-    
-    col1.metric("Career Stage", stats['career_stage'], help="Based on their age in their most recent active year: Early (<20), Peak (20-26), Decline (>26).")
-    col2.metric("Years Competing", int(stats['years_competing']), help="Total distinct years this athlete recorded a time.")
-    
-    col3.metric(
-        label="Gap to Top 10", 
-        value=gap_text,
-        delta=gap_eval,
-        delta_color="off",
-        help="Difference between their latest best time and the 10th fastest global time that year."
-    )
-    
-    col4.metric(
-        label="Dist. from PB", 
-        value=f"{dist_pb:.2f} s",
-        delta=pb_eval,
-        delta_color="off",
-        help="Time difference between their latest season's best and their all-time personal best."
-    )
-
-    with st.expander("📚 How to read these benchmarks (Coach's Guide)"):
-        st.markdown("""
-        * **Gap to Top 10:** If they are inside the Top 10 (`<= 0s`), they are on **Elite / Podium Pace**. Being within 0.5s is considered **Finalist Pace**.
-        * **Distance from PB:** If the distance is `0.00s`, it means their most recent season was their absolute fastest ever (**Absolute Peak**).
-        """)
+    col1.metric("Career Stage", stats.get('career_stage', 'N/A'))
+    col2.metric("Years Competing", int(stats.get('years_competing', 0)))
+    col3.metric("Gap to Top 10", f"{gap:.2f}s")
+    col4.metric("Dist. from PB", f"{dist_pb:.2f}s")
 
     st.write("---")
     
-# --- 3. THE VISUALISATION: Swimmer vs. The World ---
-    st.write("### Contextual Breakdown: Swimmer vs. The World")
+    # --- 2. ADVANCED BENCHMARK ENGINE (TOP 8) ---
+    st.write(f"### Contextual Breakdown: {name} vs. The World")
     
-    global_yearly = event_df.groupby('Year')['Time_Sec'].agg(
-        top_10_time=lambda x: x.nsmallest(10).max() if len(x) >= 10 else x.max()
-    ).reset_index()
+    # NEW: Streamlit Multi-select for dynamic country comparison
+    all_countries = sorted(event_df['Country'].dropna().unique().tolist())
+    default_countries = [athlete_country] if athlete_country in all_countries else []
     
-    swimmer_yearly = history.groupby('Year')['Time_Sec'].min().reset_index()
-    swimmer_yearly.rename(columns={'Time_Sec': 'Swimmer_Time'}, inplace=True)
+    selected_countries = st.multiselect(
+        "🌍 Add Countries to Compare (Top 8 Avg):",
+        options=all_countries,
+        default=default_countries,
+        help="Select multiple countries to overlay their Elite Top 8 averages. You can also remove the home country."
+    )
     
-    compare_df = swimmer_yearly.merge(global_yearly, on='Year', how='left')
+    # A. Global Top 8 Average (3-Year Smoothing)
+    global_yearly = event_df.groupby('Year')['Time_Sec'].apply(
+        lambda x: x.nsmallest(8).mean()
+    ).reset_index(name='global_avg')
+    global_yearly['global_benchmark'] = global_yearly['global_avg'].rolling(window=3, min_periods=1).mean()
     
-    if len(compare_df) > 0:
+    # B. Dynamic Country Top 8 Averages
+    country_dataframes = {}
+    for country in selected_countries:
+        country_df = event_df[event_df['Country'] == country]
+        if not country_df.empty:
+            country_yearly = country_df.groupby('Year')['Time_Sec'].apply(
+                lambda x: x.nsmallest(8).mean() if len(x) >= 1 else x.mean()
+            ).reset_index(name='country_avg')
+            country_yearly['benchmark'] = country_yearly['country_avg'].rolling(window=3, min_periods=1).mean()
+            country_dataframes[country] = country_yearly
+
+    # C. Swimmer's Yearly Best
+    swimmer_yearly = history.groupby('Year')['Time_Sec'].min().reset_index(name='swimmer_best')
+    
+    # Merge Global with Athlete for base plot dataframe
+    plot_df = swimmer_yearly.merge(global_yearly[['Year', 'global_benchmark']], on='Year', how='left')
+    
+    # --- 3. THE VISUALIZATION ---
+    if not plot_df.empty:
         fig = go.Figure()
         
-        # FIX: Dynamically calculate the ceiling so we don't ruin the scale!
-        fastest_time = min(compare_df['top_10_time'].min(), compare_df['Swimmer_Time'].min())
-        ceiling_time = fastest_time - 1.0 # Just 1 second faster than the best time on the chart
-        
-        # Add the invisible ceiling
+        # 1. Global Benchmark Line (Red, thick, semi-transparent band)
         fig.add_trace(go.Scatter(
-            x=compare_df['Year'], y=[ceiling_time]*len(compare_df), 
-            mode='none', showlegend=False, hoverinfo='skip'
+            x=plot_df['Year'], y=plot_df['global_benchmark'],
+            mode='lines', name='Global Top 8 Avg',
+            line=dict(color='rgba(252, 129, 129, 0.4)', width=8),
+            hovertemplate="Global Elite: %{y:.2f}s<extra></extra>"
         ))
         
-        # Then we draw the Top 10 line and fill the space between it and the invisible ceiling
+        # 2. Dynamic Country Lines
+        # A list of distinct colors so multiple countries don't blend together
+        color_palette = ['#4FD1C5', '#F6E05E', '#D6BCFA', '#F6AD55', '#68D391', '#F687B3']
+        
+        for idx, country in enumerate(selected_countries):
+            if country in country_dataframes:
+                c_df = country_dataframes[country]
+                line_color = color_palette[idx % len(color_palette)] # Cycle through colors
+                
+                fig.add_trace(go.Scatter(
+                    x=c_df['Year'], y=c_df['benchmark'],
+                    mode='lines+markers', name=f'{country} Top 8 Avg',
+                    line=dict(color=line_color, dash='dot', width=3),
+                    marker=dict(size=6, color=line_color),
+                    hovertemplate=f"{country} Elite: %{{y:.2f}}s<extra></extra>"
+                ))
+        
+        # 3. Athlete Best Time Line (Thick Blue)
         fig.add_trace(go.Scatter(
-            x=compare_df['Year'], y=compare_df['top_10_time'], 
-            mode='lines+markers', name='Global Top 10 Cutoff',
-            line=dict(color='red', dash='dash'),
-            fill='tonexty', fillcolor='rgba(255, 215, 0, 0.15)' # Faint Gold Shading
-        ))
-                                 
-        # Add our Swimmer's line on top
-        fig.add_trace(go.Scatter(
-            x=compare_df['Year'], y=compare_df['Swimmer_Time'], 
-            mode='lines+markers', name=f'{name} Best Time',
-            line=dict(color='blue', width=3)
+            x=plot_df['Year'], y=plot_df['swimmer_best'],
+            mode='lines+markers', name=f'{name} Best',
+            line=dict(color='#1E90FF', width=4),
+            marker=dict(size=10, color='white', line=dict(width=2, color='#1E90FF')),
+            hovertemplate="Athlete: %{y:.2f}s<extra></extra>"
         ))
         
+        fig.update_yaxes(autorange="reversed") # Faster is UP
         fig.update_layout(
-            title=f"Yearly Comparison: {name} vs. Global Top 10 Cutoff",
+            title=f"Career Context: {name} vs Regional Elite Averages",
             xaxis_title="Year",
-            yaxis_title="Time (Seconds) - Lower is Faster",
-            hovermode="x unified"
+            yaxis_title="Time (Seconds)",
+            hovermode="x unified",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            template="plotly_dark"
         )
-                          
-        # Invert the Y-axis so "Faster" is visually UP
-        fig.update_yaxes(autorange="reversed")
         
-        # Add an annotation to explain the gold zone (dynamically placed now)
         fig.add_annotation(
-            x=compare_df['Year'].iloc[0], y=compare_df['top_10_time'].iloc[0] - 0.2,
-            text="🏆 Elite Zone", showarrow=False, font=dict(color="goldenrod")
+            x=plot_df['Year'].iloc[0], y=plot_df['global_benchmark'].iloc[0],
+            text="🏆 Global Top 8 Avg", showarrow=False, font=dict(color="#FC8181"),
+            yshift=15
         )
         
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("Not enough data to plot a comparison chart.")
+        st.info("Insufficient data to generate Top 8 comparison benchmarks.")
