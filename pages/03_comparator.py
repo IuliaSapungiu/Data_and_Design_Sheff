@@ -24,17 +24,6 @@ else:
     # Safely extract country
     athlete_country = target.get('country', target.get('Country', 'Unknown'))
 
-    with st.expander("📚 How to read these benchmarks (Coach's Guide)", expanded=False):
-        st.markdown("""
-        ### Understanding the "Elite 5" Radar Metrics:
-        * **Peak Speed:** The athlete's all-time fastest performance. Score of **100** = fastest among peers.
-        * **Current Form:** How close their recent season is to their PB. Score of **100** = at absolute peak.
-        * **Momentum:** Progression slope. High scores = rapidly dropping time.
-        * **Consistency:** Standard deviation. **100** = machine-like precision.
-        * **Global Threat:** Gap to Global Top 8 final average.
-        """)
-
-    st.write("---")
     st.write(f"### Finding Peers for: **{name}**")
     
     # --- COMPACT UNIFIED CONTROL PANEL ---
@@ -92,7 +81,18 @@ else:
         
         # --- 1. COMPACT DYNAMIC MATCHES SHOWCASE ---
         st.write("<br>", unsafe_allow_html=True)
-        st.markdown(f"##### 🥇 Top {num_peers} closest matches:")
+        
+        # --- NEW: COACH-FRIENDLY TOOLTIP FOR THE ENTIRE ROW ---
+        explanation_text = (
+            "**How to read these peer cards:**\n\n"
+            "⏱️ **Time Delta (e.g., +0.13s in Red/Green):** The difference between this peer's best time and your athlete's best time. "
+            "**Red** means this peer is slower (+). **Green** means this peer is faster (-).\n\n"
+            "📈 **Trajectory:** Progression slope over time. A **negative value (Green)** means they are actively dropping time year-over-year. "
+            "A **positive value (Red)** means their times are slowing down or plateauing.\n\n"
+            "🎯 **Consistency:** Standard deviation of their race times. A **lower number** means they are highly predictable and reliable. "
+            "A **higher number** indicates erratic, boom-or-bust performances."
+        )
+        st.markdown(f"##### 🥇 Top {num_peers} closest matches:", help=explanation_text)
         
         cols = st.columns(3)
         for i, (_, row) in enumerate(similar_df.iterrows()):
@@ -107,7 +107,7 @@ else:
             delta_col = "#F87171" if time_diff > 0 else "#4ADE80"
             slope_col = "#4ADE80" if slope < 0 else "#F87171"
             
-            # Unified HTML Card (No double borders, clean spacing, full words)
+            # Unified HTML Card
             card_html = (
                 f"<div style='border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 16px; margin-bottom: 16px; background-color: rgba(255,255,255,0.03);'>"
                 f"<div style='font-size: 1.1rem; font-weight: 700; color: #FFFFFF; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;'>{row['Swimmer']}</div>"
@@ -126,7 +126,6 @@ else:
             )
             
             with cols[i % 3]: 
-                # Removed st.container(border=True) to eliminate the double box
                 st.markdown(card_html, unsafe_allow_html=True)
 
         # --- 2. INTERACTIVE 3D GLOBAL MAP ---
@@ -270,7 +269,30 @@ else:
         
         # --- 4. HEAD-TO-HEAD RADAR & COACHING ---
         st.write("### ⚔️ Head-to-Head Deep Dive")
-        compare_name = st.selectbox("Select a peer to analyze 1-on-1 against your target:", peer_names)
+        
+        with st.expander("📚 How to read these radar benchmarks (Coach's Guide)", expanded=False):
+            st.markdown("""
+            **Understanding the "Elite 5" Radar Index:**
+            *This 0-100 indexing system normalizes raw race data, allowing coaches to visually compare completely different variables (like speed vs. variance) on a single chart.*
+
+            * ⚡ **Peak Speed (Maximal Output):** Based on the athlete's lifetime Personal Best (PB). A score of **100** represents the fastest absolute time within this specific generated peer group.
+            * 🎯 **Current Form (Peak Proximity):** The actual time gap between their most recent recorded race and their lifetime PB. A score of **100** indicates the athlete is currently racing at—or surpassing—their historical peak capability.
+            * 📈 **Momentum (Progression Trajectory):** Derived from the linear regression slope of their seasonal bests. A score of **100** means the athlete is rapidly and consistently dropping times year-over-year.
+            * ⏱️ **Consistency (Variance Control):** Calculated using the standard deviation (σ) of the athlete's career times. A score of **100** indicates extremely low variance (machine-like pacing and reliability across multiple races).
+            * 🌍 **Global Threat (Elite Gap):** The exact time gap between the athlete's PB and the historical Global Top 8 Finalist cutoff. A score of **100** means the athlete is currently swimming at true Olympic Finalist pace.
+            """)
+            
+        st.write("##### 🔍 Select a Peer to Analyze:")
+        
+        # --- NEW: TILE-BASED PEER SELECTOR ---
+        # Using a horizontal radio button makes the options appear as selectable tiles/buttons
+        compare_name = st.radio(
+            "Peer Selection", 
+            options=peer_names, 
+            horizontal=True, 
+            label_visibility="collapsed"
+        )
+        
         compare_stats = similar_df[similar_df['Swimmer'] == compare_name].iloc[0]
         
         t_bt, c_bt = target_best_time, compare_stats['best_time']
