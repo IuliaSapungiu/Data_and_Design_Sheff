@@ -37,19 +37,20 @@ else:
     st.write("---")
     st.write(f"### Finding Peers for: **{name}**")
     
-    # --- UNIFIED CONTROL PANEL ---
+    # --- COMPACT UNIFIED CONTROL PANEL ---
     with st.container(border=True):
-        st.write("#### ⚙️ Match Engine Settings")
+        st.markdown("#### ⚙️ Match Engine Settings")
         
-        # Step 1: Scope
-        scope = st.radio(
-            "**Step 1: Comparison Scope** (Select the talent pool to pull from)",
-            ["🌍 Global (All Available)", f"📍 National ({athlete_country} Only)"],
-            horizontal=True
-        )
+        c1, c2, c3 = st.columns([1.2, 1, 2], gap="medium")
         
+        with c1:
+            scope = st.radio(
+                "**1️⃣ Comparison Scope**",
+                ["🌍 Global (All)", f"📍 National ({athlete_country})"],
+                help="Global uses the full dataset. National restricts peers exclusively to the athlete's home country."
+            )
+            
         # --- RUN ENGINE IN THE BACKGROUND ---
-        # We must filter event_df first, then use those swimmers to filter features_df
         if "National" in scope:
             working_event_df = event_df[event_df['Country'] == athlete_country].copy()
             national_swimmers = working_event_df['Swimmer'].unique()
@@ -58,32 +59,29 @@ else:
             working_features_df = features_df.copy()
             working_event_df = event_df.copy()
 
-        # Run the matching algorithm
         similar_df_full, target_best_time, target_event = find_similar_swimmers(target, working_features_df, working_event_df, max_n=10)
-        
-        st.caption(f"**Primary Event Detected for Matching:** `{target_event}`")
 
-        # Step 2 & 3: Layout in Columns if Engine succeeds
         if not similar_df_full.empty:
-            st.write("---")
-            c1, c2 = st.columns([1, 2], gap="large")
-            
-            with c1:
+            with c2:
                 max_available = len(similar_df_full)
                 num_peers = st.selectbox(
-                    "**Step 2: Matches to Display**", 
+                    "**2️⃣ Matches to Display**", 
                     options=list(range(1, max_available + 1)), 
-                    index=min(2, max_available - 1)
+                    index=min(2, max_available - 1), 
+                    help="Select how many similar athletes to show in the cards and graph."
                 )
-            
-            with c2:
+                
+            with c3:
                 all_years = event_df['Year'].unique()
                 min_y, max_y = int(min(all_years)), int(max(all_years))
                 selected_years = st.slider(
-                    "**Step 3: Graph Timeframe** (Filter eras to remove gaps)",
+                    "**3️⃣ Graph Timeframe**",
                     min_value=min_y, max_value=max_y, 
-                    value=(max(min_y, max_y - 15), max_y)
+                    value=(max(min_y, max_y - 15), max_y),
+                    help="Filter years to remove historical gaps or focus on a specific Olympic cycle."
                 )
+                
+            st.caption(f"🎯 **Target Event:** `{target_event}` | The AI is comparing performances strictly within this event.")
         else:
             st.error(f"Dataset Error: Not enough data to find peers for {name} in the selected scope.")
 
@@ -92,20 +90,44 @@ else:
         similar_df = similar_df_full.head(num_peers)
         peer_names = similar_df['Swimmer'].tolist()
         
-        # --- 1. DYNAMIC MATCHES SHOWCASE ---
+        # --- 1. COMPACT DYNAMIC MATCHES SHOWCASE ---
         st.write("<br>", unsafe_allow_html=True)
         st.markdown(f"##### 🥇 Top {num_peers} closest matches:")
+        
         cols = st.columns(3)
         for i, (_, row) in enumerate(similar_df.iterrows()):
+            p_time = row['best_time']
+            time_diff = p_time - target_best_time
+            country = row.get('Country', 'Unknown')
+            slope = row.get('progression_slope', row.get('slope', 0.0))
+            cons = row.get('consistency_score', 0)
+            
+            # High-contrast, minimal color coding
+            delta_bg = "rgba(248, 113, 113, 0.15)" if time_diff > 0 else "rgba(74, 222, 128, 0.15)"
+            delta_col = "#F87171" if time_diff > 0 else "#4ADE80"
+            slope_col = "#4ADE80" if slope < 0 else "#F87171"
+            
+            # Unified HTML Card (No double borders, clean spacing, full words)
+            card_html = (
+                f"<div style='border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 16px; margin-bottom: 16px; background-color: rgba(255,255,255,0.03);'>"
+                f"<div style='font-size: 1.1rem; font-weight: 700; color: #FFFFFF; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;'>{row['Swimmer']}</div>"
+                f"<div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;'>"
+                f"<div style='font-size: 1.8rem; font-weight: 800; color: #FFFFFF;'>{p_time:.2f}<span style='font-size: 1rem; color: #A0AEC0; font-weight: 600;'>s</span></div>"
+                f"<div style='font-size: 0.85rem; font-weight: 700; color: {delta_col}; background: {delta_bg}; padding: 4px 10px; border-radius: 4px;'>{time_diff:+.2f}s</div>"
+                f"</div>"
+                f"<div style='font-size: 0.85rem; color: #D1D5DB; margin-bottom: 16px; display: flex; align-items: center; gap: 6px;'>"
+                f"📍 <span style='background: rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 4px;'>{country}</span>"
+                f"</div>"
+                f"<div style='display: flex; flex-direction: column; gap: 8px; font-size: 0.85rem; color: #A0AEC0; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px;'>"
+                f"<div style='display: flex; justify-content: space-between;'><span>📈 Trajectory:</span><span style='color: {slope_col}; font-weight: 700;'>{slope:.3f}</span></div>"
+                f"<div style='display: flex; justify-content: space-between;'><span>🎯 Consistency:</span><span style='color: #FFFFFF; font-weight: 700;'>{cons:.2f}</span></div>"
+                f"</div>"
+                f"</div>"
+            )
+            
             with cols[i % 3]: 
-                with st.container(border=True):
-                    st.write(f"#### {row['Swimmer']}")
-                    p_time = row['best_time']
-                    time_diff = p_time - target_best_time
-                    st.metric("Best Time vs Target", f"{p_time:.2f}s", delta=f"{time_diff:+.2f}s", delta_color="inverse")
-                    st.markdown(f"**Country:** `{row.get('Country', 'Unknown')}`")
-                    st.markdown(f"**Trajectory:** `{row.get('progression_slope', row.get('slope', 0.0)):.3f}`")
-                    st.markdown(f"**Consistency:** `{row.get('consistency_score', 0):.2f}`")
+                # Removed st.container(border=True) to eliminate the double box
+                st.markdown(card_html, unsafe_allow_html=True)
 
         # --- 2. INTERACTIVE 3D GLOBAL MAP ---
         st.write("---")
