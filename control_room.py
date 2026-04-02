@@ -230,23 +230,23 @@ with main_col:
         with c1:
             gender_options = sorted(df['Gender'].dropna().unique())
             selected_gender = st.selectbox("Select Gender", gender_options, index=gender_options.index('M') if 'M' in gender_options else 0)
-            filtered_df = df[df['Gender'] == selected_gender]
-
-        with c2:
-            country_options = ["All Countries"] + sorted(filtered_df['Country'].dropna().unique().tolist())
-            selected_country = st.selectbox("Select Country", country_options)
-            if selected_country != "All Countries":
-                filtered_df = filtered_df[filtered_df['Country'] == selected_country]
+            global_df = df[df['Gender'] == selected_gender]
 
         with c3:
-            stroke_options = sorted(filtered_df['Stroke'].dropna().unique())
+            # We filter Stroke & Distance before Country so the Global Dataset is complete
+            stroke_options = sorted(global_df['Stroke'].dropna().unique())
             selected_stroke = st.selectbox("Select Stroke", stroke_options)
-            filtered_df = filtered_df[filtered_df['Stroke'] == selected_stroke]
+            global_df = global_df[global_df['Stroke'] == selected_stroke]
 
         with c4:
-            distance_options = sorted(filtered_df['Distance'].dropna().unique())
+            distance_options = sorted(global_df['Distance'].dropna().unique())
             selected_distance = st.selectbox("Select Distance", distance_options)
-            filtered_df = filtered_df[filtered_df['Distance'] == selected_distance]
+            global_df = global_df[global_df['Distance'] == selected_distance]
+
+        with c2:
+            # The country select box now only affects the visible leaderboard
+            country_options = ["All Countries"] + sorted(global_df['Country'].dropna().unique().tolist())
+            selected_country = st.selectbox("Select Country", country_options)
 
         st.write("##### Set Timeframe")
         min_yr = int(df['Year'].min()) if not df.empty else 2000
@@ -257,9 +257,16 @@ with main_col:
             label_visibility="collapsed"
         )
 
-    filtered_df = filtered_df[(filtered_df['Year'] >= selected_years[0]) & (filtered_df['Year'] <= selected_years[1])]
+    # 1. PREPARE THE GLOBAL ENGINE DATA (Whole world for this event)
+    global_df = global_df[(global_df['Year'] >= selected_years[0]) & (global_df['Year'] <= selected_years[1])]
     selected_event = f"{selected_distance} {selected_stroke}"
-    filtered_df['Swimmer'] = filtered_df['Swimmer'].str.strip() 
+    global_df['Swimmer'] = global_df['Swimmer'].str.strip() 
+
+    # 2. PREPARE THE LOCAL LEADERBOARD DATA (Just the selected country)
+    if selected_country != "All Countries":
+        leaderboard_df = global_df[global_df['Country'] == selected_country].copy()
+    else:
+        leaderboard_df = global_df.copy()
 
     # --- GLOBAL ENGINE HELPER FUNCTION ---
     @st.cache_data
@@ -268,19 +275,18 @@ with main_col:
         perf_df = build_performance_features(working_df)
         return pd.merge(prog_df, perf_df, on='FINA ID')
 
-    # FIX: Updated to correctly persist 'country' for the performance tab benchmarks
     def process_and_navigate(swimmer_name, event_name, full_filtered_df):
-        with st.spinner(f"Crunching engine data for {swimmer_name}..."):
+        # By passing global_df into this function, the AI processes the whole world!
+        with st.spinner(f"Crunching global engine data for {swimmer_name}..."):
             features_df = generate_all_features(full_filtered_df)
             target_data = features_df[features_df['Swimmer'] == swimmer_name]
             
             if target_data.empty:
                 st.error(f"⚠️ Not enough historical data for {swimmer_name}.")
             else:
-                # PERSIST COUNTRY: Extract from raw data to ensure benchmarking lines work
                 athlete_country = full_filtered_df[full_filtered_df['Swimmer'] == swimmer_name]['Country'].iloc[0]
                 stats_dict = target_data.iloc[0].to_dict()
-                stats_dict['country'] = athlete_country  # Save as lowercase 'country'
+                stats_dict['country'] = athlete_country  
                 
                 st.session_state['swimmer_stats'] = stats_dict
                 st.session_state['swimmer_name'] = swimmer_name
@@ -291,24 +297,24 @@ with main_col:
                 st.session_state['analytics_loaded'] = True 
                 st.switch_page("pages/01_progression.py")
 
-    # --- DATA AGGREGATION ---
-    if not filtered_df.empty:
-        idx_best = filtered_df.groupby('Swimmer')['Time_Sec'].idxmin()
-        best_df = filtered_df.loc[idx_best, ['Swimmer', 'Time_Sec', 'Year', 'Country']]
+    # --- DATA AGGREGATION FOR LEADERBOARD ---
+    if not leaderboard_df.empty:
+        idx_best = leaderboard_df.groupby('Swimmer')['Time_Sec'].idxmin()
+        best_df = leaderboard_df.loc[idx_best, ['Swimmer', 'Time_Sec', 'Year', 'Country']]
         best_df.columns = ['Swimmer', 'best_time', 'best_year', 'country']
 
-        idx_latest = filtered_df.groupby('Swimmer')['Year'].idxmax()
+        idx_latest = leaderboard_df.groupby('Swimmer')['Year'].idxmax()
         cols_to_extract = ['Swimmer', 'Time_Sec', 'Year']
-        if 'Age' in filtered_df.columns:
+        if 'Age' in leaderboard_df.columns:
             cols_to_extract.append('Age')
-            latest_df = filtered_df.loc[idx_latest, cols_to_extract]
+            latest_df = leaderboard_df.loc[idx_latest, cols_to_extract]
             latest_df.columns = ['Swimmer', 'latest_time', 'latest_year', 'latest_age']
         else:
-            latest_df = filtered_df.loc[idx_latest, cols_to_extract]
+            latest_df = leaderboard_df.loc[idx_latest, cols_to_extract]
             latest_df.columns = ['Swimmer', 'latest_time', 'latest_year']
             latest_df['latest_age'] = np.nan 
 
-        years_df = filtered_df.groupby('Swimmer')['Year'].nunique().reset_index(name='years_competed')
+        years_df = leaderboard_df.groupby('Swimmer')['Year'].nunique().reset_index(name='years_competed')
         swimmer_summary = best_df.merge(latest_df, on='Swimmer').merge(years_df, on='Swimmer')
     else:
         swimmer_summary = pd.DataFrame()
@@ -335,7 +341,8 @@ with main_col:
 
     if search_swimmer != "":
         if filter_search:
-            process_and_navigate(search_swimmer, selected_event, filtered_df)
+            # We now pass global_df so the AI engine gets world data
+            process_and_navigate(search_swimmer, selected_event, global_df)
         else:
             athlete_raw = df[df['Swimmer'].str.strip() == search_swimmer].copy()
             if not athlete_raw.empty:
@@ -357,12 +364,11 @@ with main_col:
         best_overall = leaderboard['best_time'].iloc[0]
         leaderboard['Gap'] = leaderboard['best_time'] - best_overall
         
-        # --- STYLED KPI CARDS ---
         st.write("<br>", unsafe_allow_html=True)
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         
         with kpi1:
-            st.markdown(f'<div class="kpi-card"><span class="kpi-icon">👥</span><div class="kpi-title">Total Athletes Found</div><div class="kpi-value">{len(leaderboard):,}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-card"><span class="kpi-icon">👥</span><div class="kpi-title">Athletes Found</div><div class="kpi-value">{len(leaderboard):,}</div></div>', unsafe_allow_html=True)
 
         with kpi2:
             st.markdown(f'<div class="kpi-card"><span class="kpi-icon">🥇</span><div class="kpi-title">Leader (Gold Pace)</div><div class="kpi-value">{best_overall:.2f}s</div></div>', unsafe_allow_html=True)
@@ -384,7 +390,6 @@ with main_col:
             
         st.write("<br>", unsafe_allow_html=True)
         
-        # Table Display
         display_df = pd.DataFrame({
             'Rank': [f"{i+1}" for i in range(len(leaderboard))],
             'Athlete': leaderboard['Swimmer'],
@@ -414,7 +419,9 @@ with main_col:
         if len(selection_event.selection.rows) > 0:
             selected_row_index = selection_event.selection.rows[0]
             selected_swimmer_name = display_df.iloc[selected_row_index]['Athlete']
-            process_and_navigate(selected_swimmer_name, selected_event, filtered_df)
+            
+            # CRITICAL FIX: Pass global_df so the AI has the whole world to compare against
+            process_and_navigate(selected_swimmer_name, selected_event, global_df)
             
     else:
         st.info("No data available for the current filter selection.")
