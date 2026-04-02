@@ -10,3 +10,4 @@ __pycache__/
 *.pyc
 myenv/
 data/*.parquet
+!data/WA_Rankings_2000_2025_Master_v1.parquet
