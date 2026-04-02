@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import numpy as np
 import plotly.express as px
 import base64
 import os
@@ -50,7 +51,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 3. SPLASH SCREEN (Runs only on first load)
+# 2. SPLASH SCREEN (Runs only on first load)
 if 'splash_shown' not in st.session_state:
     st.markdown("""
         <style>
@@ -64,7 +65,7 @@ if 'splash_shown' not in st.session_state:
     """, unsafe_allow_html=True)
     st.session_state['splash_shown'] = True
 
-# 4. PORTABLE LOGO LOADER
+# 3. PORTABLE LOGO LOADER
 @st.cache_data
 def get_base64_img(file_name):
     current_dir = os.path.dirname(__file__)

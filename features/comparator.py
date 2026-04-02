@@ -11,9 +11,11 @@ def find_similar_swimmers(target_stats, features_df, event_df, max_n=10):
     # Start with everyone except the target
     pool = features_df[features_df['FINA ID'] != target_id].copy()
     
-    # We drop country from the pool temporarily to avoid merge conflicts
-    if 'Country' in pool.columns:
-        pool = pool.drop(columns=['Country'])
+    # BUG FIX: Drop both Country AND best_time from the pool temporarily 
+    # to avoid pandas creating best_time_x and best_time_y during the merge!
+    cols_to_drop = [col for col in ['Country', 'best_time'] if col in pool.columns]
+    if cols_to_drop:
+        pool = pool.drop(columns=cols_to_drop)
     
     # Extract EXACT columns from the filtered raw data using 'Time_Sec'
     raw_stats = event_df.groupby('FINA ID').agg(
@@ -70,9 +72,6 @@ def find_similar_swimmers(target_stats, features_df, event_df, max_n=10):
         pool['similarity_distance'] += weight * ((pool_norm - target_norm) ** 2)
         
     pool['similarity_distance'] = np.sqrt(pool['similarity_distance'])
-    
-    # NOTE: The 15% country bias logic has been completely removed from here.
-    # Matches are now strictly based on the mathematical distance of their performances.
 
     pool = pool.drop_duplicates(subset=['Swimmer'])
     pool = pool.sort_values('similarity_distance')
