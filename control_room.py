@@ -227,15 +227,14 @@ with main_col:
 
     # --- 4. RESULTS & LEADERBOARD ---
     st.write("---")
-    st.write(f"### 🏆 Global Leaderboard ({selected_country} | {selected_gender} - {selected_event})")
 
     if not swimmer_summary.empty:
         leaderboard = swimmer_summary.sort_values('best_time', ascending=True).reset_index(drop=True)
         best_overall = leaderboard['best_time'].iloc[0]
         leaderboard['Gap'] = leaderboard['best_time'] - best_overall
         
-        # ADDED TOOLTIPS (`help=...`) to all KPIs!
-        st.write("")
+        # Keep KPIs visible on the main page so it still looks like a dashboard
+        st.write(f"### 📊 Quick Stats: {selected_gender} - {selected_event} ({selected_country})")
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         kpi1.metric("Total Athletes Found", f"{len(leaderboard):,}", 
                     help="The total number of unique swimmers currently matching your gender, country, stroke, and timeframe filters.")
@@ -253,6 +252,7 @@ with main_col:
                     help="The average time difference between all filtered athletes and the current #1 Leader.")
         st.write("")
         
+        # Dataframe logic
         leaderboard['Medal %'] = np.clip(85 - (leaderboard['Gap'] * 60), 1, 99).astype(int).astype(str) + "%"
         leaderboard['Finalist %'] = np.clip(95 - (leaderboard['Gap'] * 35), 5, 99).astype(int).astype(str) + "%"
         
@@ -281,22 +281,22 @@ with main_col:
         
         styled_df = display_df.style.apply(highlight_rows, axis=1)
         
-        st.caption("👇 **Click on any row in the table below to automatically load their full analytical profile.**")
-        
-        # REDUCED HEIGHT to 400px to prevent the user getting "trapped" while scrolling
-        selection_event = st.dataframe(
-            styled_df, 
-            use_container_width=True, 
-            hide_index=True,
-            height=400, 
-            on_select="rerun",
-            selection_mode="single-row"
-        )
-        
-        if len(selection_event.selection.rows) > 0:
-            selected_row_index = selection_event.selection.rows[0]
-            selected_swimmer_name = display_df.iloc[selected_row_index]['Athlete']
-            # Target engine uses the toggle logic too!
-            process_and_navigate(selected_swimmer_name, selected_event, target_engine_df)
+        # WRAP THE HEAVY TABLE IN AN EXPANDER TO PREVENT PAGE JUMPS AND LAG
+        with st.expander(f"🏆 View Full Global Leaderboard Table", expanded=False):
+            st.caption("👇 **Click on any row in the table below to automatically load their full analytical profile.**")
+            
+            selection_event = st.dataframe(
+                styled_df, 
+                use_container_width=True, 
+                hide_index=True,
+                height=400, 
+                on_select="rerun",
+                selection_mode="single-row"
+            )
+            
+            if len(selection_event.selection.rows) > 0:
+                selected_row_index = selection_event.selection.rows[0]
+                selected_swimmer_name = display_df.iloc[selected_row_index]['Athlete']
+                process_and_navigate(selected_swimmer_name, selected_event, target_engine_df)
 
     st.markdown("<br><br><br>", unsafe_allow_html=True)
