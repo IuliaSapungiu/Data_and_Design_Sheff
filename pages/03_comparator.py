@@ -128,7 +128,7 @@ else:
             with cols[i % 3]: 
                 st.markdown(card_html, unsafe_allow_html=True)
 
-        # --- 2. INTERACTIVE 3D GLOBAL MAP ---
+        # --- 2. INTERACTIVE 2D GLOBAL MAP ---
         st.write("---")
         st.write("### 🌍 Global Distribution of Peers")
         
@@ -165,40 +165,35 @@ else:
         min_c = map_grouped['Count'].min()
         max_c = map_grouped['Count'].max()
         range_c = [min_c, max_c] if min_c != max_c else [0, max_c]
-        
-        def get_gradient_color(val):
-            v_min, v_max = range_c[0], range_c[1]
-            if v_max == v_min: return "#E63946" 
-            ratio = max(0.0, min(1.0, (val - v_min) / (v_max - v_min)))
-            r = int(255 + ratio * (230 - 255))
-            g = int(209 + ratio * (57 - 209))
-            b = int(102 + ratio * (70 - 102))
-            return f"#{r:02x}{g:02x}{b:02x}"
 
         col_list, col_map = st.columns([1, 2.5], gap="large")
 
         with col_list:
             st.write("#### 📍 Focus Country")
-            st.caption("Click a colored row to fly to that country. Click again to reset.")
             
             display_df = map_grouped[['Plotly_Country', 'Count']].rename(columns={'Plotly_Country': 'Country', 'Count': 'Peers'})
             display_df = display_df.sort_values('Peers', ascending=False).reset_index(drop=True)
             
-            def style_rows(row):
-                bg = get_gradient_color(row['Peers'])
-                return [f"background-color: {bg}; color: #1E1E1E; font-weight: 700; border-bottom: 2px solid #0E1117;"] * len(row)
-            
-            styled_df = display_df.style.apply(style_rows, axis=1)
-            
-            selection = st.dataframe(
-                styled_df, hide_index=True, on_select="rerun", 
-                selection_mode="single-row", use_container_width=True, height=350
-            )
-            
-            focus = None
-            if len(selection.selection.rows) > 0:
-                idx = selection.selection.rows[0]
-                focus = display_df.iloc[idx]['Country']
+            # --- TILE-BASED SELECTOR (Replaces Table) ---
+            tile_cols = st.columns(2)
+            for idx, row in enumerate(display_df.itertuples()):
+                c_name = row.Country
+                c_count = row.Peers
+                if tile_cols[idx % 2].button(f"{c_name}\n({c_count})", key=f"tile_{c_name}", use_container_width=True):
+                    st.session_state['map_focus'] = c_name
+                    
+            if st.button("Reset Map View", use_container_width=True):
+                st.session_state['map_focus'] = None
+
+            # --- SCOUTING INSIGHT (Fills Vertical Space) ---
+            st.write("<br>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.write("#### 💡 Scouting Insight")
+                if not display_df.empty:
+                    top_country = display_df.iloc[0]['Country']
+                    st.info(f"The highest density of competitive peers is in **{top_country}**. This suggests their training systems are producing the most direct rivals for {name}.")
+                else:
+                    st.info("Not enough data to generate scouting insights.")
 
         with col_map:
             color_scale = [[0.0, "#FFD166"], [1.0, "#E63946"]]
@@ -211,17 +206,22 @@ else:
             
             fig_map.update_traces(hovertemplate="<b>%{customdata[0]}</b><br>Total Peers: %{customdata[2]}<br>%{customdata[1]}<extra></extra>")
             
+            focus = st.session_state.get('map_focus', None)
+            
+            # Zoom logic for 2D Map
             if focus and focus in country_coords:
-                geo_rotation = dict(lat=country_coords[focus]['lat'], lon=country_coords[focus]['lon'], roll=0)
-                projection_scale = 1.5 
+                geo_center = dict(lat=country_coords[focus]['lat'], lon=country_coords[focus]['lon'])
+                projection_scale = 2.5 # Zoom in tight
             else:
-                geo_rotation = dict(lat=20, lon=0, roll=0) 
-                projection_scale = 1 
+                geo_center = dict(lat=20, lon=0) 
+                projection_scale = 1.0 # Standard flat world view
 
             fig_map.update_layout(
                 geo=dict(
-                    projection_type='orthographic', projection_rotation=geo_rotation,
-                    projection_scale=projection_scale, showframe=False, showcoastlines=True,
+                    projection_type='natural earth', # Changed from orthographic (3D) to natural earth (2D Flat)
+                    center=geo_center,
+                    projection_scale=projection_scale, 
+                    showframe=False, showcoastlines=True,
                     coastlinecolor="rgba(255, 255, 255, 0.1)", bgcolor='rgba(0,0,0,0)', 
                     lakecolor='rgba(0,0,0,0)', landcolor='rgba(255, 255, 255, 0.05)',
                     showcountries=True, countrycolor="rgba(255, 255, 255, 0.1)"
@@ -284,8 +284,7 @@ else:
             
         st.write("##### 🔍 Select a Peer to Analyze:")
         
-        # --- NEW: TILE-BASED PEER SELECTOR ---
-        # Using a horizontal radio button makes the options appear as selectable tiles/buttons
+        # --- TILE-BASED PEER SELECTOR ---
         compare_name = st.radio(
             "Peer Selection", 
             options=peer_names, 
