@@ -25,7 +25,7 @@ def build_performance_features(df):
     
     career_stats = []
     
-    # 5. Calculate Career Stages & Distance from Peak
+# 5. Calculate Career Stages & Distance from Peak
     for fina_id, group in yearly_best.groupby('FINA ID'):
         years_competing = group['Year'].nunique()
         personal_best = group['Time_Sec'].min()
@@ -44,10 +44,16 @@ def build_performance_features(df):
             career_stage = 'Peak'
         else:
             career_stage = 'Decline'
+
+        # --- THE BULLETPROOF COUNTRY FIX ---
+        # Look at every year this person swam and drop the empty ones
+        valid_countries = group['Country'].dropna()
+        # Grab the first real country we find. If none exist, then they truly are Unknown.
+        final_country = valid_countries.iloc[0] if not valid_countries.empty else "Unknown"
             
         career_stats.append({
             'FINA ID': fina_id,
-            'Country': latest_year_data['Country'], # <--- ADDED: Pass country to the final output
+            'Country': final_country, # <-- Use the bulletproof country here!
             'years_competing': years_competing,
             'distance_from_peak': distance_from_peak,
             'career_stage': career_stage,

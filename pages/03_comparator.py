@@ -27,7 +27,8 @@ else:
     name = target['Swimmer']
     
     # Safely extract country for Tarun's National filtering
-    athlete_country = target.get('country', target.get('Country', 'Unknown'))
+    raw_country = target.get('Country', target.get('country'))
+    athlete_country = "Unknown" if pd.isna(raw_country) or not str(raw_country).strip() else str(raw_country)
 
     # --- COACH'S GUIDE ---
     with st.expander("📚 How to read these benchmarks (Coach's Guide)", expanded=False):
@@ -53,11 +54,20 @@ else:
         c1, c2 = st.columns([1.2, 2], gap="medium")
         
         with c1:
+            # Dynamically build the options list
+            scope_options = ["🌍 Global (All)"]
+            if athlete_country != "Unknown":
+                scope_options.append(f"📍 National ({athlete_country})")
+                
             scope = st.radio(
                 "**1️⃣ Comparison Scope**",
-                ["🌍 Global (All)", f"📍 National ({athlete_country})"],
+                scope_options,
                 help="Global uses the full dataset. National restricts peers exclusively to the athlete's home country."
             )
+            
+            # Show a helpful note if the National option was removed
+            if athlete_country == "Unknown":
+                st.caption("⚠️ *National scope disabled (Athlete's country is missing from the database).*")
             
         # --- RUN ENGINE IN THE BACKGROUND ---
         if "National" in scope:
