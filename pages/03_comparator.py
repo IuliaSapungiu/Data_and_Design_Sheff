@@ -4,6 +4,8 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from features.comparator import find_similar_swimmers
+from features.progression import build_progression_features
+from features.performance import build_performance_features
 from shared_ui import render_navbar
 
 # 1. Page Config and Navbar
@@ -39,40 +41,62 @@ else:
                 help="Global uses the full dataset. National restricts peers exclusively to the athlete's home country."
             )
             
-        # --- RUN ENGINE IN THE BACKGROUND ---
+        # --- 1. DEFINE TIMEFRAME SLIDER FIRST ---
+        with c3:
+            all_years = event_df['Year'].unique()
+            min_y, max_y = int(min(all_years)), int(max(all_years))
+            selected_years = st.slider(
+                "**3️⃣ Evaluation Timeframe**",
+                min_value=min_y, max_value=max_y, 
+                value=(max(min_y, max_y - 15), max_y),
+                help="Filter years to focus on a specific era. This dynamically recalculates peer matches and updates the tiles!"
+            )
+            
+        # --- 2. APPLY TIMEFRAME FILTER AND DYNAMICALLY REBUILD FEATURES ---
+        working_event_df = event_df[(event_df['Year'] >= selected_years[0]) & (event_df['Year'] <= selected_years[1])].copy()
+        
         if "National" in scope:
-            working_event_df = event_df[event_df['Country'] == athlete_country].copy()
-            national_swimmers = working_event_df['Swimmer'].unique()
-            working_features_df = features_df[features_df['Swimmer'].isin(national_swimmers)].copy()
+            working_event_df = working_event_df[working_event_df['Country'] == athlete_country]
+            
+        # Helper function to natively recalculate stats for the chosen timeframe
+        @st.cache_data(show_spinner=False)
+        def generate_tf_features(df_in):
+            if df_in.empty: return pd.DataFrame()
+            prog = build_progression_features(df_in)
+            perf = build_performance_features(df_in)
+            if 'FINA ID' in prog.columns and 'FINA ID' in perf.columns:
+                return pd.merge(prog, perf, on='FINA ID')
+            return pd.merge(prog, perf, on='Swimmer')
+
+        with st.spinner(f"Recalculating analytics for {selected_years[0]}-{selected_years[1]} era..."):
+            working_features_df = generate_tf_features(working_event_df)
+        
+        # Ensure target athlete exists in this timeframe before running comparator
+        if not working_features_df.empty and name in working_features_df['Swimmer'].values:
+            target_data = working_features_df[working_features_df['Swimmer'] == name]
+            target_copy = target_data.iloc[0].to_dict()
+            target_copy['country'] = athlete_country
+            
+            similar_df_full, target_best_time, target_event = find_similar_swimmers(target_copy, working_features_df, working_event_df, max_n=20)
         else:
-            working_features_df = features_df.copy()
-            working_event_df = event_df.copy()
+            similar_df_full = pd.DataFrame()
 
-        similar_df_full, target_best_time, target_event = find_similar_swimmers(target, working_features_df, working_event_df, max_n=10)
-
+        # --- 3. RENDER MATCH SELECTBOX BASED ON ENGINE RESULTS ---
         if not similar_df_full.empty:
             with c2:
                 max_available = len(similar_df_full)
                 num_peers = st.selectbox(
                     "**2️⃣ Matches to Display**", 
                     options=list(range(1, max_available + 1)), 
-                    index=min(2, max_available - 1), 
+                    index=min(9, max_available - 1), # Defaults to 10 if available
                     help="Select how many similar athletes to show in the cards and graph."
                 )
                 
-            with c3:
-                all_years = event_df['Year'].unique()
-                min_y, max_y = int(min(all_years)), int(max(all_years))
-                selected_years = st.slider(
-                    "**3️⃣ Graph Timeframe**",
-                    min_value=min_y, max_value=max_y, 
-                    value=(max(min_y, max_y - 15), max_y),
-                    help="Filter years to remove historical gaps or focus on a specific Olympic cycle."
-                )
-                
-            st.caption(f"🎯 **Target Event:** `{target_event}` | The AI is comparing performances strictly within this event.")
+            st.caption(f"🎯 **Target Event:** `{target_event}` | The AI is comparing performances strictly within the {selected_years[0]}-{selected_years[1]} timeframe.")
         else:
-            st.error(f"Dataset Error: Not enough data to find peers for {name} in the selected scope.")
+            with c2:
+                st.selectbox("**2️⃣ Matches to Display**", options=[0])
+            st.error(f"⚠️ {name} has insufficient data in the {selected_years[0]}-{selected_years[1]} timeframe to generate matches.")
 
     # Only render the rest of the page if the engine found peers
     if not similar_df_full.empty:
@@ -82,7 +106,6 @@ else:
         # --- 1. COMPACT DYNAMIC MATCHES SHOWCASE ---
         st.write("<br>", unsafe_allow_html=True)
         
-        # --- NEW: COACH-FRIENDLY TOOLTIP FOR THE ENTIRE ROW ---
         explanation_text = (
             "**How to read these peer cards:**\n\n"
             "⏱️ **Time Delta (e.g., +0.13s in Red/Green):** The difference between this peer's best time and your athlete's best time. "
@@ -92,7 +115,7 @@ else:
             "🎯 **Consistency:** Standard deviation of their race times. A **lower number** means they are highly predictable and reliable. "
             "A **higher number** indicates erratic, boom-or-bust performances."
         )
-        st.markdown(f"##### 🥇 Top {num_peers} closest matches:", help=explanation_text)
+        st.markdown(f"##### 🥇 Top {num_peers} closest matches (Filtered by {selected_years[0]}-{selected_years[1]}):", help=explanation_text)
         
         cols = st.columns(3)
         for i, (_, row) in enumerate(similar_df.iterrows()):
@@ -102,12 +125,10 @@ else:
             slope = row.get('progression_slope', row.get('slope', 0.0))
             cons = row.get('consistency_score', 0)
             
-            # High-contrast, minimal color coding
             delta_bg = "rgba(248, 113, 113, 0.15)" if time_diff > 0 else "rgba(74, 222, 128, 0.15)"
             delta_col = "#F87171" if time_diff > 0 else "#4ADE80"
             slope_col = "#4ADE80" if slope < 0 else "#F87171"
             
-            # Unified HTML Card
             card_html = (
                 f"<div style='border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 16px; margin-bottom: 16px; background-color: rgba(255,255,255,0.03);'>"
                 f"<div style='font-size: 1.1rem; font-weight: 700; color: #FFFFFF; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;'>{row['Swimmer']}</div>"
@@ -174,7 +195,6 @@ else:
             display_df = map_grouped[['Plotly_Country', 'Count']].rename(columns={'Plotly_Country': 'Country', 'Count': 'Peers'})
             display_df = display_df.sort_values('Peers', ascending=False).reset_index(drop=True)
             
-            # --- TILE-BASED SELECTOR (Replaces Table) ---
             tile_cols = st.columns(2)
             for idx, row in enumerate(display_df.itertuples()):
                 c_name = row.Country
@@ -185,13 +205,12 @@ else:
             if st.button("Reset Map View", use_container_width=True):
                 st.session_state['map_focus'] = None
 
-            # --- SCOUTING INSIGHT (Fills Vertical Space) ---
             st.write("<br>", unsafe_allow_html=True)
             with st.container(border=True):
                 st.write("#### 💡 Scouting Insight")
                 if not display_df.empty:
                     top_country = display_df.iloc[0]['Country']
-                    st.info(f"The highest density of competitive peers is in **{top_country}**. This suggests their training systems are producing the most direct rivals for {name}.")
+                    st.info(f"The highest density of competitive peers during this era is in **{top_country}**. This suggests their training systems are producing the most direct rivals for {name}.")
                 else:
                     st.info("Not enough data to generate scouting insights.")
 
@@ -208,17 +227,16 @@ else:
             
             focus = st.session_state.get('map_focus', None)
             
-            # Zoom logic for 2D Map
             if focus and focus in country_coords:
                 geo_center = dict(lat=country_coords[focus]['lat'], lon=country_coords[focus]['lon'])
-                projection_scale = 2.5 # Zoom in tight
+                projection_scale = 2.5 
             else:
                 geo_center = dict(lat=20, lon=0) 
-                projection_scale = 1.0 # Standard flat world view
+                projection_scale = 1.0 
 
             fig_map.update_layout(
                 geo=dict(
-                    projection_type='natural earth', # Changed from orthographic (3D) to natural earth (2D Flat)
+                    projection_type='natural earth', 
                     center=geo_center,
                     projection_scale=projection_scale, 
                     showframe=False, showcoastlines=True,
@@ -237,11 +255,9 @@ else:
         st.write("### 📈 Career Trajectory Comparison")
         
         compare_group = [name] + peer_names
-        history_df = event_df[
-            (event_df['Swimmer'].isin(compare_group)) & 
-            (event_df['Year'] >= selected_years[0]) & 
-            (event_df['Year'] <= selected_years[1])
-        ].copy()
+        
+        # Graph uses the working_event_df which is already filtered by the selected slider!
+        history_df = working_event_df[working_event_df['Swimmer'].isin(compare_group)].copy()
         
         if not history_df.empty:
             yearly_progression = history_df.groupby(['Year', 'Swimmer'])['Time_Sec'].min().reset_index()
@@ -284,7 +300,6 @@ else:
             
         st.write("##### 🔍 Select a Peer to Analyze:")
         
-        # --- TILE-BASED PEER SELECTOR ---
         compare_name = st.radio(
             "Peer Selection", 
             options=peer_names, 
@@ -295,11 +310,11 @@ else:
         compare_stats = similar_df[similar_df['Swimmer'] == compare_name].iloc[0]
         
         t_bt, c_bt = target_best_time, compare_stats['best_time']
-        t_form, c_form = target.get('distance_from_peak', 0.0), compare_stats.get('distance_from_peak', 0.0)
-        t_slope = target.get('progression_slope', 0.0)
+        t_form, c_form = target_copy.get('distance_from_peak', 0.0), compare_stats.get('distance_from_peak', 0.0)
+        t_slope = target_copy.get('progression_slope', 0.0)
         c_slope = compare_stats.get('progression_slope', 0.0)
-        t_cons, c_cons = target.get('consistency_score', 0.0), compare_stats.get('consistency_score', 0.0)
-        t_threat, c_threat = target.get('latest_gap_to_top10', 0.0), compare_stats.get('latest_gap_to_top10', 0.0)
+        t_cons, c_cons = target_copy.get('consistency_score', 0.0), compare_stats.get('consistency_score', 0.0)
+        t_threat, c_threat = target_copy.get('latest_gap_to_top10', 0.0), compare_stats.get('latest_gap_to_top10', 0.0)
 
         def fmt_d(val1, val2):
             diff = val2 - val1

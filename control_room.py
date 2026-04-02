@@ -211,7 +211,7 @@ st.markdown(f"""
     <div class="hero-wrapper">
         <div class="hero-left">
             <div class="hero-sub-text">Elite Performance Analytics</div>
-            <div class="hero-main-title">Precision in <br>Every Stroke</div>
+            <div class="hero-main-title">Intelligence in <br>Every Stroke</div>
         </div>
         <div class="hero-right">
             <img src="{logo_html}" class="logo-img">
