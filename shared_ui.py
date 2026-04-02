@@ -101,14 +101,13 @@ def render_navbar():
 
     # 2. CONDITIONAL NAVIGATION BUTTONS
     if st.session_state.get('analytics_loaded', False):
-        nav_cols = st.columns(4)
+        nav_cols = st.columns(3) # Changed from 4 to 3
+        
         with nav_cols[0]:
             st.page_link("control_room.py", label="Home", use_container_width=True)
         with nav_cols[1]:
             st.page_link("pages/01_progression.py", label="Progression", use_container_width=True)
         with nav_cols[2]:
-            st.page_link("pages/02_performance.py", label="Performance", use_container_width=True)
-        with nav_cols[3]:
-            st.page_link("pages/03_comparator.py", label="Comparator", use_container_width=True)
+            st.page_link("pages/03_comparator.py", label="Comparator", use_container_width=True) # Shifted from [3] to [2]
         
         st.write("---")

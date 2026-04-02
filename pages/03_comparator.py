@@ -30,6 +30,10 @@ else:
     raw_country = target.get('Country', target.get('country'))
     athlete_country = "Unknown" if pd.isna(raw_country) or not str(raw_country).strip() else str(raw_country)
 
+    # Initialize map state variable if not present
+    if 'map_focus' not in st.session_state:
+        st.session_state.map_focus = None
+
     # --- COACH'S GUIDE ---
     with st.expander("📚 How to read these benchmarks (Coach's Guide)", expanded=False):
         st.markdown("""
@@ -47,14 +51,13 @@ else:
     st.write("---")
     st.write(f"### Finding Peers for: **{name}**")
 
-    # --- COMPACT UNIFIED CONTROL PANEL (Tarun's Feature) ---
+    # --- COMPACT UNIFIED CONTROL PANEL ---
     with st.container(border=True):
         st.markdown("#### ⚙️ Match Engine Settings")
         
         c1, c2 = st.columns([1.2, 2], gap="medium")
         
         with c1:
-            # Dynamically build the options list
             scope_options = ["🌍 Global (All)"]
             if athlete_country != "Unknown":
                 scope_options.append(f"📍 National ({athlete_country})")
@@ -65,7 +68,6 @@ else:
                 help="Global uses the full dataset. National restricts peers exclusively to the athlete's home country."
             )
             
-            # Show a helpful note if the National option was removed
             if athlete_country == "Unknown":
                 st.caption("⚠️ *National scope disabled (Athlete's country is missing from the database).*")
             
@@ -100,7 +102,7 @@ else:
         similar_df = similar_df_full.head(num_peers)
         peer_names = similar_df['Swimmer'].tolist()
         
-        # --- 1. COMPACT DYNAMIC MATCHES SHOWCASE (Tarun's UI) ---
+        # --- 1. COMPACT DYNAMIC MATCHES SHOWCASE ---
         st.write("<br>", unsafe_allow_html=True)
         st.markdown(f"##### 🥇 Top {num_peers} closest matches:")
         
@@ -112,22 +114,18 @@ else:
             slope = safe_get(row, 'progression_slope', safe_get(row, 'slope', 0.0))
             cons = safe_get(row, 'consistency_score', 0)
             
-            # High-contrast, minimal color coding
             delta_bg = "rgba(248, 113, 113, 0.15)" if time_diff > 0 else "rgba(74, 222, 128, 0.15)"
             delta_col = "#F87171" if time_diff > 0 else "#4ADE80"
             slope_col = "#4ADE80" if slope < 0 else "#F87171"
             
-            # Unified HTML Card (Now with helpful labels!)
             card_html = (
                 f"<div style='border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 16px; margin-bottom: 16px; background-color: rgba(255,255,255,0.03);'>"
                 f"<div style='font-size: 1.1rem; font-weight: 700; color: #FFFFFF; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;'>{row['Swimmer']}</div>"
                 f"<div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;'>"
                 
-                # Added 'Best Time' Label above the main time
                 f"<div><div style='font-size: 0.75rem; color: #A0AEC0; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;'>Best Time</div>"
                 f"<div style='font-size: 1.8rem; font-weight: 800; color: #FFFFFF;'>{p_time:.2f}<span style='font-size: 1rem; color: #A0AEC0; font-weight: 600;'>s</span></div></div>"
                 
-                # Added 'vs Target' Label above the colored box
                 f"<div style='text-align: right;'><div style='font-size: 0.75rem; color: #A0AEC0; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;'>vs Target</div>"
                 f"<div style='font-size: 0.85rem; font-weight: 700; color: {delta_col}; background: {delta_bg}; padding: 4px 10px; border-radius: 4px;'>{time_diff:+.2f}s</div></div>"
                 f"</div>"
@@ -145,7 +143,7 @@ else:
             with cols[i % 3]: 
                 st.markdown(card_html, unsafe_allow_html=True)
 
-        # --- 2. INTERACTIVE 3D GLOBAL MAP (Tarun's Feature) ---
+        # --- 2. INTERACTIVE GLOBAL MAP ---
         st.write("---")
         st.write("### 🌍 Global Distribution of Peers")
         
@@ -161,7 +159,9 @@ else:
             "Spain": {"lat": 40, "lon": -4}, "Iran": {"lat": 32, "lon": 53},
             "Poland": {"lat": 51, "lon": 19}, "Switzerland": {"lat": 46, "lon": 8},
             "New Zealand": {"lat": -40, "lon": 174}, "Romania": {"lat": 45, "lon": 25},
-            "Ireland": {"lat": 53, "lon": -8}, "Greece": {"lat": 39, "lon": 22}
+            "Ireland": {"lat": 53, "lon": -8}, "Greece": {"lat": 39, "lon": 22},
+            "Croatia": {"lat": 45, "lon": 15}, "Egypt": {"lat": 26, "lon": 30},
+            "Mozambique": {"lat": -18, "lon": 35}
         }
         
         country_mapper = {
@@ -183,39 +183,40 @@ else:
         max_c = map_grouped['Count'].max()
         range_c = [min_c, max_c] if min_c != max_c else [0, max_c]
         
-        def get_gradient_color(val):
-            v_min, v_max = range_c[0], range_c[1]
-            if v_max == v_min: return "#E63946" 
-            ratio = max(0.0, min(1.0, (val - v_min) / (v_max - v_min)))
-            r = int(255 + ratio * (230 - 255))
-            g = int(209 + ratio * (57 - 209))
-            b = int(102 + ratio * (70 - 102))
-            return f"#{r:02x}{g:02x}{b:02x}"
-
         col_list, col_map = st.columns([1, 2.5], gap="large")
 
         with col_list:
             st.write("#### 📍 Focus Country")
-            st.caption("Click a colored row to fly to that country. Click again to reset.")
             
             display_df = map_grouped[['Plotly_Country', 'Count']].rename(columns={'Plotly_Country': 'Country', 'Count': 'Peers'})
             display_df = display_df.sort_values('Peers', ascending=False).reset_index(drop=True)
             
-            def style_rows(row):
-                bg = get_gradient_color(row['Peers'])
-                return [f"background-color: {bg}; color: #1E1E1E; font-weight: 700; border-bottom: 2px solid #0E1117;"] * len(row)
+            # --- Dynamic Button Grid (Replicating Image UI) ---
+            btn_cols = st.columns(2)
+            for i, row in display_df.iterrows():
+                country_name = row['Country']
+                count = row['Peers']
+                with btn_cols[i % 2]:
+                    # Type="primary" provides the thematic background color automatically
+                    if st.button(f"{country_name} ({count})", key=f"btn_{country_name}", use_container_width=True, type="primary"):
+                        st.session_state.map_focus = country_name
             
-            styled_df = display_df.style.apply(style_rows, axis=1)
-            
-            selection = st.dataframe(
-                styled_df, hide_index=True, on_select="rerun", 
-                selection_mode="single-row", use_container_width=True, height=350
-            )
-            
-            focus = None
-            if len(selection.selection.rows) > 0:
-                idx = selection.selection.rows[0]
-                focus = display_df.iloc[idx]['Country']
+# --- THE FIX IS HERE ---
+            if st.button("Reset Map View", use_container_width=True, type="primary"):
+                st.session_state.map_focus = None
+                st.rerun() # Forces the map to instantly zoom back out
+                
+            focus = st.session_state.get('map_focus', None)
+
+            # --- SCOUTING INSIGHT ---
+            st.write("<br>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.write("#### 💡 Scouting Insight")
+                if not display_df.empty:
+                    top_country = display_df.iloc[0]['Country']
+                    st.info(f"The highest density of competitive peers is in **{top_country}**.\n\nThis suggests their training systems are producing the most direct rivals for **{name}**.")
+                else:
+                    st.info("Not enough data to generate scouting insights.")
 
         with col_map:
             color_scale = [[0.0, "#FFD166"], [1.0, "#E63946"]]
@@ -229,15 +230,16 @@ else:
             fig_map.update_traces(hovertemplate="<b>%{customdata[0]}</b><br>Total Peers: %{customdata[2]}<br>%{customdata[1]}<extra></extra>")
             
             if focus and focus in country_coords:
-                geo_rotation = dict(lat=country_coords[focus]['lat'], lon=country_coords[focus]['lon'], roll=0)
-                projection_scale = 1.5 
+                geo_center = dict(lat=country_coords[focus]['lat'], lon=country_coords[focus]['lon'])
+                projection_scale = 3.5 
             else:
-                geo_rotation = dict(lat=20, lon=0, roll=0) 
-                projection_scale = 1 
+                geo_center = dict(lat=20, lon=0) 
+                projection_scale = 1.0 
 
             fig_map.update_layout(
                 geo=dict(
-                    projection_type='orthographic', projection_rotation=geo_rotation,
+                    projection_type='natural earth', 
+                    center=geo_center,
                     projection_scale=projection_scale, showframe=False, showcoastlines=True,
                     coastlinecolor="rgba(255, 255, 255, 0.1)", bgcolor='rgba(0,0,0,0)', 
                     lakecolor='rgba(0,0,0,0)', landcolor='rgba(255, 255, 255, 0.05)',
@@ -251,7 +253,22 @@ else:
         st.write("---")
         
         # --- 3. MULTI-SWIMMER PROGRESSION GRAPH ---
-        st.write("### 📈 Career Trajectory Comparison")
+        c_head, c_slider = st.columns([1, 1], gap="large")
+        with c_head:
+            st.write("### 📈 Career Trajectory Comparison")
+            
+        with c_slider:
+            # Shifted Graph Timeframe controls to be directly next to the graph
+            min_year = int(event_df['Year'].min()) if not event_df.empty else 2000
+            max_year = int(event_df['Year'].max()) if not event_df.empty else 2024
+            
+            selected_years = st.slider(
+                "**🗓️ Graph Timeframe (Years)**",
+                min_value=min_year, 
+                max_value=max_year,
+                value=(min_year, max_year),
+                help="Adjust the years to instantly filter the trajectory chart below."
+            )
         
         st.info("""
         **How to read this chart:**
@@ -262,9 +279,11 @@ else:
         
         compare_group = [name] + peer_names
         
-        # NOTE: Removed the selected_years filtering. It now shows their full history.
+        # DataFrame filtered dynamically by the new slider position
         history_df = event_df[
-            (event_df['Swimmer'].isin(compare_group))
+            (event_df['Swimmer'].isin(compare_group)) &
+            (event_df['Year'] >= selected_years[0]) & 
+            (event_df['Year'] <= selected_years[1])
         ].copy()
         
         if not history_df.empty:
@@ -291,13 +310,31 @@ else:
             
         st.write("---")
         
-        # --- 4. HEAD-TO-HEAD RADAR & COACHING (Your logic + Tarun's Radar) ---
+        # --- 4. HEAD-TO-HEAD RADAR & COACHING ---
         st.write("### ⚔️ Head-to-Head Deep Dive")
+
+        with st.expander("📚 How to read these radar benchmarks (Coach's Guide)", expanded=False):
+            st.markdown("""
+            **Understanding the "Elite 5" Radar Index:**
+            *This 0-100 indexing system normalizes raw race data, allowing coaches to visually compare completely different variables (like speed vs. variance) on a single chart.*
+
+            * ⚡ **Peak Speed (Maximal Output):** Based on the athlete's lifetime Personal Best (PB). A score of **100** represents the fastest absolute time within this specific generated peer group.
+            * 🎯 **Current Form (Peak Proximity):** The actual time gap between their most recent recorded race and their lifetime PB. A score of **100** indicates the athlete is currently racing at—or surpassing—their historical peak capability.
+            * 📈 **Momentum (Progression Trajectory):** Derived from the linear regression slope of their seasonal bests. A score of **100** means the athlete is rapidly and consistently dropping times year-over-year.
+            * ⏱️ **Consistency (Variance Control):** Calculated using the standard deviation (σ) of the athlete's career times. A score of **100** indicates extremely low variance (machine-like pacing and reliability across multiple races).
+            * 🌍 **Global Threat (Elite Gap):** The exact time gap between the athlete's PB and the historical Global Top 8 Finalist cutoff. A score of **100** means the athlete is currently swimming at true Olympic Finalist pace.
+            """)
+            
+        st.write("##### 🔍 Select a Peer to Analyze:")
         
-        compare_name = st.selectbox("Select a peer to analyze 1-on-1 against your target:", similar_df_full['Swimmer'].tolist())
-        compare_stats = similar_df_full[similar_df_full['Swimmer'] == compare_name].iloc[0]
+        compare_name = st.radio(
+            "Peer Selection", 
+            options=peer_names, 
+            horizontal=True, 
+            label_visibility="collapsed"
+        )
+        compare_stats = similar_df[similar_df['Swimmer'] == compare_name].iloc[0]
         
-        # Using your safe getters for robust error handling
         t_bt = target_best_time
         c_bt = safe_get(compare_stats, 'best_time')
         t_form = safe_get(target, 'distance_from_peak')
@@ -313,7 +350,6 @@ else:
             diff = val2 - val1
             return f"({diff:+.2f})" if diff != 0 else "(Equal)"
 
-        # --- THE TALE OF THE TAPE (Your layout) ---
         st.write("#### 🥊 Tale of the Tape")
         st.markdown(f"""
         | Metric | {name} | {compare_name} |
@@ -325,19 +361,12 @@ else:
         | **Threat (Gap to Top 8)** | **{t_threat:.2f}s** | {c_threat:.2f}s {fmt_d(t_threat, c_threat)} |
         """)
 
-        st.write("") # Spacer
+        st.write("") 
 
-        # --- THE RADAR CHART ---
         st.info("""
         **How to read the Radar Chart (Head-to-Head Profile):** This chart maps five key career attributes on a scale of 0 to 100 relative to the peer group. 
         * **The Shape:** The polygon maps the athlete's **Peak Speed**, **Current Form**, **Momentum**, **Consistency**, and **Global Threat**. 
         * **The Size:** The further outward a point stretches toward the edge, the stronger that trait is. A larger overall area indicates a more dominant statistical profile.
-        * **The Metrics:**
-            * **Peak Speed:** 100 = The absolute fastest time in the comparison pool.
-            * **Current Form:** 100 = Currently swimming right at their absolute personal best.
-            * **Momentum:** 100 = Rapidly dropping time year-over-year.
-            * **Consistency:** 100 = Machine-like precision (very low standard deviation).
-            * **Global Threat:** 100 = Time is faster than the global top 8 average.
         """)
 
         col_radar, col_coach = st.columns([1.5, 1], gap="large")
@@ -364,7 +393,6 @@ else:
             fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=400, margin=dict(l=50, r=50, t=20, b=20), showlegend=True)
             st.plotly_chart(fig_radar, use_container_width=True)
             
-        # --- THE COACH'S ACTION PLAN (Your specific alert triggers) ---
         with col_coach:
             st.write("### 📋 Coach's Action Plan")
             st.caption(f"Comparing **{name}** vs **{compare_name}**.")
