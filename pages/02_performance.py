@@ -15,7 +15,7 @@ else:
     history = st.session_state['swimmer_history']
     event_df = st.session_state['event_df'] 
     
-    athlete_country = stats.get('country', 'Unknown')
+    athlete_country = stats.get('Country', stats.get('country', 'Unknown'))
     
     st.write(f"### Current Standing: {name} ({athlete_country})")
     
