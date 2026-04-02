@@ -103,50 +103,58 @@ st.markdown("""
             60% {transform: translateY(-5px) translateX(-50%);}
         }
         
-        /* Custom KPI Cards */
+        /* --- UPDATED COMPACT KPI CARDS --- */
         .kpi-card {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 16px;
-            padding: 20px;
+            border-radius: 10px; /* Tighter corners */
+            padding: 12px 8px; /* Significantly reduced padding */
             text-align: center;
-            transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
             height: 100%;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            min-height: 115px; /* Forces all cards to be perfectly even */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
         }
         .kpi-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 20px rgba(0, 164, 228, 0.2);
-            border-color: rgba(0, 164, 228, 0.5);
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0, 164, 228, 0.15);
+            border-color: rgba(0, 164, 228, 0.4);
         }
         .kpi-icon {
-            font-size: 1.8rem;
-            margin-bottom: 8px;
+            font-size: 1.3rem; /* Smaller icon */
+            margin-bottom: 4px;
             display: block;
+            line-height: 1;
         }
         .kpi-title {
             color: #a0aec0;
-            font-size: 0.85rem;
-            font-weight: 600;
+            font-size: 0.7rem; /* Smaller, crisper title */
+            font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 1.5px;
-            margin-bottom: 10px;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
         }
         .kpi-value {
-            font-size: 2.2rem;
-            font-weight: 700;
+            font-size: 1.6rem; /* Smaller value */
+            font-weight: 800;
             color: white;
-            margin-bottom: 8px;
-            letter-spacing: -1px;
+            margin-bottom: 4px;
+            letter-spacing: -0.5px;
+            line-height: 1;
         }
         .kpi-delta {
-            font-size: 0.85rem;
+            font-size: 0.7rem;
             font-weight: 700;
-            padding: 4px 10px;
-            border-radius: 20px;
+            padding: 2px 8px;
+            border-radius: 12px;
             display: inline-block;
+            margin-top: auto; /* Pushes badges to the bottom evenly */
         }
         .delta-red { color: #FC8181; background: rgba(252, 129, 129, 0.15); }
         .delta-neutral { color: #A0AEC0; background: rgba(160, 174, 192, 0.15); }
@@ -233,7 +241,6 @@ with main_col:
             global_df = df[df['Gender'] == selected_gender]
 
         with c3:
-            # We filter Stroke & Distance before Country so the Global Dataset is complete
             stroke_options = sorted(global_df['Stroke'].dropna().unique())
             selected_stroke = st.selectbox("Select Stroke", stroke_options)
             global_df = global_df[global_df['Stroke'] == selected_stroke]
@@ -244,7 +251,6 @@ with main_col:
             global_df = global_df[global_df['Distance'] == selected_distance]
 
         with c2:
-            # The country select box now only affects the visible leaderboard
             country_options = ["All Countries"] + sorted(global_df['Country'].dropna().unique().tolist())
             selected_country = st.selectbox("Select Country", country_options)
 
@@ -257,16 +263,102 @@ with main_col:
             label_visibility="collapsed"
         )
 
-    # 1. PREPARE THE GLOBAL ENGINE DATA (Whole world for this event)
+    # 1. PREPARE THE GLOBAL ENGINE DATA
     global_df = global_df[(global_df['Year'] >= selected_years[0]) & (global_df['Year'] <= selected_years[1])]
     selected_event = f"{selected_distance} {selected_stroke}"
     global_df['Swimmer'] = global_df['Swimmer'].str.strip() 
 
-    # 2. PREPARE THE LOCAL LEADERBOARD DATA (Just the selected country)
+    # 2. PREPARE THE LOCAL LEADERBOARD DATA
     if selected_country != "All Countries":
         leaderboard_df = global_df[global_df['Country'] == selected_country].copy()
     else:
         leaderboard_df = global_df.copy()
+
+    # --- NEW: INTERACTIVE SCOUTING DASHBOARD (Side-by-Side) ---
+    st.write("---")
+    vis_col1, vis_col2 = st.columns([1, 1], gap="large")
+
+    with vis_col1:
+        st.write(f"#### 🌍 Global Dominance: {selected_event}")
+        # Prep Data for Globe: Find the fastest time recorded by each country in this event
+        if not global_df.empty:
+            country_best = global_df.groupby('Country')['Time_Sec'].min().reset_index()
+            
+            # Simple mapper for FINA names to standard Plotly Map names
+            mapper = {
+                "People's Republic of China": "China", 
+                "Great Britain": "United Kingdom", 
+                "United States of America": "United States",
+                "Russian Federation": "Russia",
+                "Republic of Korea": "South Korea",
+                "Islamic Republic of Iran": "Iran"
+            }
+            country_best['Map_Name'] = country_best['Country'].replace(mapper)
+
+            fig_globe = px.choropleth(
+                country_best, locations="Map_Name", locationmode="country names",
+                color="Time_Sec", color_continuous_scale="Viridis_r", # Reversed so faster times are brighter
+                hover_name="Country", hover_data={"Map_Name": False, "Time_Sec": ":.2f"},
+                template="plotly_dark", labels={'Time_Sec': 'Best Time (s)'}
+            )
+            fig_globe.update_geos(
+                projection_type="orthographic", bgcolor="rgba(0,0,0,0)", 
+                showcountries=True, countrycolor="rgba(255,255,255,0.1)",
+                showocean=False
+            )
+            
+            # FIX: Correctly nested title font inside title dictionary
+            fig_globe.update_layout(
+                margin=dict(l=0,r=0,t=0,b=0), 
+                height=350,
+                coloraxis_colorbar=dict(
+                    title=dict(text="Seconds", font=dict(color="white", size=12)),
+                    thickness=12,
+                    len=0.7,
+                    yanchor="middle", y=0.5,
+                    xanchor="left", x=0.9,
+                    tickfont=dict(color="white", size=10)
+                )
+            )
+            st.plotly_chart(fig_globe, use_container_width=True)
+            
+            # --- TOP 5 COMPACT PILLS ---
+            top5_df = country_best.sort_values('Time_Sec').head(5).reset_index(drop=True)
+            if not top5_df.empty:
+                medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+                top5_html = "<div style='display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: -10px;'>"
+                for i, row in top5_df.iterrows():
+                    # Truncate extremely long country names for the compact pills
+                    c_name = row['Country'] if len(row['Country']) < 18 else row['Country'][:15] + '...'
+                    top5_html += f"<div style='background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; color: #e2e8f0;'>{medals[i]} <b>{c_name}</b> <span style='color: #4FD1C5; font-weight: bold;'>{row['Time_Sec']:.2f}s</span></div>"
+                top5_html += "</div>"
+                st.markdown(top5_html, unsafe_allow_html=True)
+                
+        else:
+            st.info("No global data available for this event.")
+
+    with vis_col2:
+        st.write(f"#### 📈 Evolution of Elite: {selected_years[0]}-{selected_years[1]}")
+        # Prep Data for Pace Tracker: Average of the top 8 fastest times per year
+        if not global_df.empty:
+            pace_df = global_df.groupby('Year')['Time_Sec'].apply(
+                lambda x: x.nsmallest(8).mean() if len(x) >= 1 else np.nan
+            ).dropna().reset_index(name='top8_avg')
+            
+            if not pace_df.empty:
+                fig_pace = px.line(pace_df, x='Year', y='top8_avg', markers=True, template="plotly_dark")
+                fig_pace.update_traces(
+                    line_color='#00A4E4', line_width=3, 
+                    marker=dict(size=8, color='white', line=dict(width=2, color='#00A4E4')),
+                    hovertemplate="Year: %{x}<br>Top 8 Avg: %{y:.2f}s<extra></extra>"
+                )
+                fig_pace.update_yaxes(autorange="reversed", title="Pace (Seconds)") # Faster is higher up
+                fig_pace.update_layout(margin=dict(l=0,r=0,t=20,b=0), height=350, xaxis_title=None, hovermode="x unified")
+                st.plotly_chart(fig_pace, use_container_width=True)
+            else:
+                st.info("Insufficient yearly data for the pace tracker.")
+        else:
+            st.info("No data available to plot pace evolution.")
 
     # --- GLOBAL ENGINE HELPER FUNCTION ---
     @st.cache_data
@@ -276,7 +368,6 @@ with main_col:
         return pd.merge(prog_df, perf_df, on='FINA ID')
 
     def process_and_navigate(swimmer_name, event_name, full_filtered_df):
-        # By passing global_df into this function, the AI processes the whole world!
         with st.spinner(f"Crunching global engine data for {swimmer_name}..."):
             features_df = generate_all_features(full_filtered_df)
             target_data = features_df[features_df['Swimmer'] == swimmer_name]
@@ -341,7 +432,6 @@ with main_col:
 
     if search_swimmer != "":
         if filter_search:
-            # We now pass global_df so the AI engine gets world data
             process_and_navigate(search_swimmer, selected_event, global_df)
         else:
             athlete_raw = df[df['Swimmer'].str.strip() == search_swimmer].copy()
@@ -420,7 +510,6 @@ with main_col:
             selected_row_index = selection_event.selection.rows[0]
             selected_swimmer_name = display_df.iloc[selected_row_index]['Athlete']
             
-            # CRITICAL FIX: Pass global_df so the AI has the whole world to compare against
             process_and_navigate(selected_swimmer_name, selected_event, global_df)
             
     else:
